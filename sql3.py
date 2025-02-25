@@ -88,7 +88,6 @@ def list_tables(db_path):
     conn.close()
     return tables
 
-
 def get_table_info(db_path, table_name):
 
     """
@@ -115,9 +114,6 @@ def get_table_info(db_path, table_name):
     
     return {'columns': columns, 'primary_key': primary_key}
 
-
-
-
 def create_new_table_query(df, db_path, table_name, primary_keys):
     import sqlite3
 
@@ -138,19 +134,12 @@ def create_new_table_query(df, db_path, table_name, primary_keys):
     conn.commit()
     conn.close()
 
-
-
 def execute_query(db_path, query):
     conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
     cursor.execute(query)
     conn.commit()
     conn.close()
-
-
-
-
-
 
 
 if __name__ == "__main__":

@@ -6,6 +6,9 @@
     # C extensions
     *.so
 
+    # Environments
+    *.env
+
     # Distribution / packaging
     .Python
     build/
@@ -169,3 +172,4 @@
 
     # PyPI configuration file
     .pypirc
+.env
