@@ -21,27 +21,35 @@ def connect_to_db(host, port, database, user, password):
         print(f"Error: {error}")
         return None
 
-def create_comments_table(conn):
-    """
-    Creates the Comments table with the updated schema if it does not exist.
-    """
-    create_table_sql = """
-    CREATE TABLE IF NOT EXISTS Comments (
-        comment_id SERIAL PRIMARY KEY,
-        website_id VARCHAR NOT NULL,
-        specific_url VARCHAR NOT NULL,
-        comment TEXT NOT NULL,
-        comment_level INT NOT NULL
-    );
-    """
+def create_tables(conn):
+    """Create tables in PostgreSQL database"""
+    commands = (
+        """
+        CREATE TABLE IF NOT EXISTS Comments (
+            id SERIAL PRIMARY KEY,
+            website_id VARCHAR(255),
+            specific_url TEXT,
+            comment TEXT,
+            comment_level INTEGER,
+            UNIQUE (specific_url, comment)  -- Add unique constraint
+        )
+        """,
+    )
+    
     try:
         cur = conn.cursor()
-        cur.execute(create_table_sql)
-        conn.commit()
+        # Execute each command
+        for command in commands:
+            cur.execute(command)
         cur.close()
+        conn.commit()
         print("Table created or verified successfully")
     except Exception as error:
         print(f"Error: {error}")
+        conn.rollback()
+    finally:
+        if cur is not None:
+            cur.close()
 
 def upsert_comments(conn, dataframe):
     """
@@ -85,4 +93,4 @@ def query_db(conn, query):
 # Establish connection and ensure table exists
 conn = connect_to_db(host, port, database, user, password)
 if conn:
-    create_comments_table(conn)
+    create_tables(conn)
