@@ -8,7 +8,34 @@ import os
 import praw.exceptions
 import sys
 from pathlib import Path
+from transformers import pipeline
 sys.path.append(str(Path(__file__).parent.parent))
+
+# Add this function at the top with other imports
+def generate_summary(comments_df, keywords, sentiment_stats):
+    # Get top 2-3 most representative comments
+    summary_comments = []
+    
+    # Get dominant sentiment
+    max_sentiment = max(sentiment_stats.items(), key=lambda x: x[1])[0]
+    
+    # Find comments that contain keywords and match dominant sentiment
+    for _, row in comments_df.iterrows():
+        comment = row['comment']
+        # Check if comment contains any keywords
+        if any(keyword.lower() in comment.lower() for keyword in keywords):
+            summary_comments.append(comment)
+            if len(summary_comments) >= 3:
+                break
+    
+    # Create summary
+    summary = f"Discussion shows {max_sentiment.lower()} sentiment ({sentiment_stats[max_sentiment]:.1f}%). "
+    summary += f"Key points discussed: {', '.join(keywords[:3])}. "
+    
+    if summary_comments:
+        summary += "\nKey insights: " + " ... ".join(summary_comments)
+    
+    return summary
 
 # Load environment variables
 load_dotenv()
@@ -66,10 +93,14 @@ def index():
                 'Negative': sentiments.count('Negative') / total * 100
             }
             
+            # Generate summary using our custom function instead of transformer
+            summary = generate_summary(comments_df, keywords, sentiment_stats)
+
             return render_template('results.html',
                                 comments=comments,
                                 keywords=keywords,
-                                sentiment_stats=sentiment_stats)
+                                sentiment_stats=sentiment_stats,
+                                summary=summary)
             
         except praw.exceptions.InvalidURL:
             flash('Invalid Reddit URL provided. Please check the URL and try again.', 'error')
