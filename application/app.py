@@ -111,7 +111,7 @@ def store_comments_for_url(url):
             os.getenv("HOST"),
             os.getenv("PORT"),
             os.getenv("DATABASE"),
-            os.getenv("USER"),
+            os.getenv("DB_USER"),
             os.getenv("PASSWORD")
         )
         
@@ -181,7 +181,7 @@ def index():
                 os.getenv("HOST"),
                 os.getenv("PORT"),
                 os.getenv("DATABASE"),
-                os.getenv("USER"),
+                os.getenv("DB_USER"),
                 os.getenv("PASSWORD")
             )
             
