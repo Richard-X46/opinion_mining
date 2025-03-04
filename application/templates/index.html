@@ -125,6 +125,8 @@
         {% endwith %}
         
         <form method="POST" class="mt-4">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
             <div class="mb-3">
                 <label for="url" class="form-label">Enter Reddit URL:</label>
                 <input type="url" class="form-control" id="url" name="url" required

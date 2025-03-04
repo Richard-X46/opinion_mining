@@ -1,0 +1,24 @@
+# Ignore .env file (to avoid pushing credentials into Docker image)
+*.env
+
+# Python cache files
+__pycache__/
+*.pyc
+*.pyo
+
+# Git repository files
+.git/
+.gitignore
+
+# Virtual environment files
+venv/
+.env/
+.venv/
+
+# Log files
+*.log
+
+# Build artifacts
+build/
+dist/
+*.egg-info

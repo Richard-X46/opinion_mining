@@ -6,6 +6,10 @@ __pycache__/
 # C extensions
 *.so
 
+# notes md
+notes.md
+*test.py
+
 # Distribution / packaging
 .Python
 build/
@@ -171,3 +175,5 @@ cython_debug/
 
 # PyPI configuration file
 .pypirc
+scrapper/test.py
+scrapper/test.py

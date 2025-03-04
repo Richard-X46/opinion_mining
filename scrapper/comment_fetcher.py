@@ -14,8 +14,7 @@ reddit = praw.Reddit(
     client_secret=os.getenv("REDDIT_CLIENT_SECRET"),
     username=os.getenv("REDDIT_USERNAME"),
     password=os.getenv("REDDIT_PASSWORD"),
-    user_agent=os.getenv("REDDIT_USER_AGENT"),
-)
+    user_agent=os.getenv("REDDIT_USER_AGENT"),)
 
 # Function to determine comment level
 def get_comment_level(comment):
@@ -88,6 +87,5 @@ def store_comments_for_url(url):
         finally:
             conn.close()
 
-# Remove the hardcoded URL and direct database operations from the main part
 if __name__ == "__main__":
     pass

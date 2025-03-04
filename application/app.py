@@ -1,15 +1,37 @@
 from flask import Flask, render_template, request, flash
+from flask_limiter.util import get_remote_address
+from flask_limiter import Limiter
+from flask_wtf.csrf import CSRFProtect
+from flask_talisman import Talisman
+import sys
+import os
+from pathlib import Path
+sys.path.append(str(Path(__file__).parent.parent))
 from scrapper.comment_fetcher import reddit, store_comments_for_url
 from scrapper.keyword_extract import extract_keywords
 from scrapper.sentiment_analysis import SentimentAnalyzer
 from scrapper.ls_psql import query_db, connect_to_db
 from dotenv import load_dotenv
-import os
 import praw.exceptions
 import sys
 from pathlib import Path
-from transformers import pipeline
-sys.path.append(str(Path(__file__).parent.parent))
+# from transformers import pipeline
+from urllib.parse import urlparse
+import re
+
+
+
+#
+def is_valid_reddit_url(url):
+    """Validate if URL is a legitimate Reddit URL"""
+    parsed = urlparse(url)
+    return parsed.netloc in [
+        "reddit.com",
+        "www.reddit.com",
+        "old.reddit.com",
+    ] and re.match(r"^/r/[^/]+/comments/[^/]+(/[^/]+)?/?$", parsed.path)
+
+
 
 # Add this function at the top with other imports
 def generate_summary(comments_df, keywords, sentiment_stats):
@@ -42,11 +64,35 @@ load_dotenv()
 
 app = Flask(__name__)
 app.secret_key = os.getenv('FLASK_SECRET_KEY', 'default-secret-key')
+csrf = CSRFProtect(app)
+talisman = Talisman(
+    app,
+    content_security_policy={
+        "default-src": "'self'",
+        "script-src": "'self' 'unsafe-inline'",
+        "style-src": "'self' 'unsafe-inline' https://cdn.jsdelivr.net https://fonts.googleapis.com",
+    },force_https=True
+)
+
+limiter = Limiter(
+    get_remote_address,
+    app=app,
+    default_limits=["200 per day", "10 per hour"],
+    storage_uri="memory://",
+)
+
+
+
 
 @app.route('/', methods=['GET', 'POST'])
 def index():
     if request.method == 'POST':
         url = request.form['url']
+
+        # Validate Reddit URL
+        if not is_valid_reddit_url(url):
+            flash('Invalid Reddit URL provided. Please check the URL and try again.', 'error')
+            return render_template('index.html')
         
         try:
             # First store comments in database
@@ -62,8 +108,8 @@ def index():
             )
             
             # Fetch comments from database
-            query = f"SELECT comment, comment_level FROM Comments WHERE specific_url = '{url}' LIMIT 10"
-            comments_df = query_db(conn, query)
+            query = "SELECT comment, comment_level FROM Comments WHERE specific_url = %s LIMIT 10"
+            comments_df = query_db(conn, query, (url,))
             
             # Process comments from database
             comments = []
@@ -112,4 +158,7 @@ def index():
     return render_template('index.html')
 
 if __name__ == '__main__':
-    app.run(debug=True)
+
+    debug_mode = os.environ.get("FLASK_ENV") != "production"
+    app.run(host="0.0.0.0", debug=debug_mode)
+

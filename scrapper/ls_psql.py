@@ -75,13 +75,16 @@ def upsert_comments(conn, dataframe):
     except Exception as error:
         print(f"Error: {error}")
 
-def query_db(conn, query):
+def query_db(conn, query, params=None):
     """
     Executes a query and returns the result as a DataFrame.
     """
     try:
         cur = conn.cursor()
-        cur.execute(query)
+        if params:
+            cur.execute(query, params)
+        else:
+            cur.execute(query)
         rows = cur.fetchall()
         colnames = [desc[0] for desc in cur.description]
         cur.close()
@@ -91,6 +94,10 @@ def query_db(conn, query):
         return None
 
 # Establish connection and ensure table exists
-conn = connect_to_db(host, port, database, user, password)
-if conn:
-    create_tables(conn)
+
+if __name__ == "__main__":
+    conn = connect_to_db(host, port, database, user, password)
+    if conn:
+        print("connected to postgres")
+    else:
+        print("failed to connect")
