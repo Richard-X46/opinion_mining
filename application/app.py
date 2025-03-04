@@ -18,6 +18,9 @@ from pathlib import Path
 # from transformers import pipeline
 from urllib.parse import urlparse
 import re
+import praw
+import pandas as pd
+from psycopg2 import sql, extras
 
 
 
@@ -56,6 +59,20 @@ def generate_summary(comments_df, keywords, sentiment_stats):
     
     if summary_comments:
         summary += "\nKey insights: " + " ... ".join(summary_comments)
+    
+    # Add this return statement
+    return summary
+
+# Add this function before store_comments_for_url
+def get_comment_level(comment):
+    """Get the nesting level of a comment"""
+    level = 0
+    parent = comment.parent()
+    while not isinstance(parent, praw.models.Submission):
+        level += 1
+        parent = parent.parent()
+    return level
+
 def store_comments_for_url(url):
     """Store comments from a given URL in the database"""
     try:
