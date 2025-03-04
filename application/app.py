@@ -56,9 +56,6 @@ def generate_summary(comments_df, keywords, sentiment_stats):
     
     if summary_comments:
         summary += "\nKey insights: " + " ... ".join(summary_comments)
-    
-    return summary
-
 def store_comments_for_url(url):
     """Store comments from a given URL in the database"""
     try:
