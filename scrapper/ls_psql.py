@@ -7,7 +7,7 @@ import os
 host = os.getenv("HOST")
 port = os.getenv("PORT")
 database = os.getenv("DATABASE")
-user = os.getenv("USER")
+user = os.getenv("DB_USER")
 password = os.getenv("PASSWORD")
 
 def connect_to_db(host, port, database, user, password):
