@@ -59,6 +59,73 @@ def generate_summary(comments_df, keywords, sentiment_stats):
     
     return summary
 
+def store_comments_for_url(url):
+    """Store comments from a given URL in the database"""
+    try:
+        website_id = "reddit.com"
+        
+        # Retrieve the submission object
+        post = reddit.submission(url=url)
+        if not post or not hasattr(post, 'comments'):
+            raise Exception("Could not fetch Reddit post or comments")
+        
+        # Replace all MoreComments objects to get comments
+        post.comments.replace_more(limit=0)
+        
+        if not post.comments:
+            raise Exception("No comments found for this post")
+        
+        # Prepare comments data
+        comments_data = []
+        for comment in list(post.comments)[:10]:  # Limit to 10 comments
+            if hasattr(comment, 'body'):  # Verify comment has body attribute
+                comments_data.append({
+                    "website_id": website_id,
+                    "specific_url": url,
+                    "comment": comment.body,
+                    "comment_level": get_comment_level(comment)
+                })
+        
+        if not comments_data:
+            raise Exception("No valid comments found")
+        
+        # Convert to DataFrame
+        comments_df = pd.DataFrame(comments_data)
+        
+        # Connect and store in database
+        conn = connect_to_db(
+            os.getenv("HOST"),
+            os.getenv("PORT"),
+            os.getenv("DATABASE"),
+            os.getenv("USER"),
+            os.getenv("PASSWORD")
+        )
+        
+        if not conn:
+            raise Exception("Database connection failed")
+        
+        try:
+            cur = conn.cursor()
+            columns = list(comments_df.columns)
+            values = [tuple(x) for x in comments_df.to_numpy()]
+            
+            insert_sql = sql.SQL(
+                "INSERT INTO Comments ({}) VALUES %s ON CONFLICT (specific_url, comment) DO NOTHING"
+            ).format(sql.SQL(", ").join(map(sql.Identifier, columns)))
+            
+            extras.execute_values(cur, insert_sql, values)
+            conn.commit()
+            cur.close()
+            return True
+        except Exception as error:
+            print(f"Database error: {error}")
+            raise error
+        finally:
+            conn.close()
+    except Exception as e:
+        print(f"Error in store_comments_for_url: {str(e)}")
+        raise e
+
 # Load environment variables
 load_dotenv()
 
@@ -95,10 +162,7 @@ def index():
             return render_template('index.html')
         
         try:
-            # First store comments in database
-            store_comments_for_url(url)
-            
-            # Connect to database
+            # Connect to database first to verify connection
             conn = connect_to_db(
                 os.getenv("HOST"),
                 os.getenv("PORT"),
@@ -107,9 +171,18 @@ def index():
                 os.getenv("PASSWORD")
             )
             
+            if conn is None:
+                raise Exception("Could not connect to database. Please check database configuration.")
+
+            # Store comments in database
+            store_comments_for_url(url)
+            
             # Fetch comments from database
             query = "SELECT comment, comment_level FROM Comments WHERE specific_url = %s LIMIT 10"
             comments_df = query_db(conn, query, (url,))
+            
+            if comments_df is None or comments_df.empty:
+                raise Exception("No comments were retrieved from the database.")
             
             # Process comments from database
             comments = []
