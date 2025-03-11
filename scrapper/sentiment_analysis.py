@@ -1,6 +1,5 @@
 import torch
 from transformers import BertTokenizer, BertForSequenceClassification
-import numpy as np
 import psycopg2
 import pandas as pd
 from dotenv import load_dotenv

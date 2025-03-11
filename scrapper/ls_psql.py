@@ -21,27 +21,11 @@ def connect_to_db(host, port, database, user, password):
         print(f"Error: {error}")
         return None
 
-def create_tables(conn):
-    """Create tables in PostgreSQL database"""
-    commands = (
-        """
-        CREATE TABLE IF NOT EXISTS Comments (
-            id SERIAL PRIMARY KEY,
-            website_id VARCHAR(255),
-            specific_url TEXT,
-            comment TEXT,
-            comment_level INTEGER,
-            UNIQUE (specific_url, comment)  -- Add unique constraint
-        )
-        """,
-    )
-    
+def create_tables(conn, create_table_query):
+    """Create tables in PostgreSQL database using the provided connection and query."""
     try:
         cur = conn.cursor()
-        # Execute each command
-        for command in commands:
-            cur.execute(command)
-        cur.close()
+        cur.execute(create_table_query)
         conn.commit()
         print("Table created or verified successfully")
     except Exception as error:
@@ -74,6 +58,52 @@ def upsert_comments(conn, dataframe):
         print("Upsert operation completed successfully")
     except Exception as error:
         print(f"Error: {error}")
+
+def upsert_table(conn, dataframe, table, primary_keys):
+    """
+    Inserts or updates rows in the specified table.
+    
+    Parameters:
+        conn: psycopg2 connection.
+        dataframe: Pandas DataFrame containing data to upsert.
+        table: Target table name (string).
+        primary_keys: List of column names that form the primary key.
+    """
+    try:
+        cur = conn.cursor()
+        columns = list(dataframe.columns)
+        values = [tuple(x) for x in dataframe.to_numpy()]
+        
+        # Determine columns to update (exclude primary keys)
+        update_columns = [col for col in columns if col not in primary_keys]
+        
+        # Build the ON CONFLICT update clause dynamically
+        updates = sql.SQL(', ').join(
+            sql.SQL("{} = EXCLUDED.{}").format(sql.Identifier(col), sql.Identifier(col))
+            for col in update_columns
+        )
+        
+        insert_query = sql.SQL(
+            """
+            INSERT INTO {table} ({fields})
+            VALUES %s
+            ON CONFLICT ({pkeys}) DO UPDATE SET
+            {updates}
+            """
+        ).format(
+            table=sql.Identifier(table),
+            fields=sql.SQL(', ').join(map(sql.Identifier, columns)),
+            pkeys=sql.SQL(', ').join(map(sql.Identifier, primary_keys)),
+            updates=updates
+        )
+        
+        extras.execute_values(cur, insert_query, values)
+        conn.commit()
+        cur.close()
+        print("Upsert operation completed successfully")
+    except Exception as error:
+        print(f"Error: {error}")
+        conn.rollback()
 
 def query_db(conn, query, params=None):
     """

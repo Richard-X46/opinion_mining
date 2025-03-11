@@ -7,10 +7,10 @@ import sys
 import os
 from pathlib import Path
 sys.path.append(str(Path(__file__).parent.parent))
-from scrapper.comment_fetcher import reddit, store_comments_for_url
+import scrapper.comment_fetcher as cf
 from scrapper.keyword_extract import extract_keywords
 from scrapper.sentiment_analysis import SentimentAnalyzer
-from scrapper.ls_psql import query_db, connect_to_db
+from scrapper.ls_psql import connect_to_db, upsert_table, query_db
 from dotenv import load_dotenv
 import praw.exceptions
 import sys
@@ -22,9 +22,6 @@ import praw
 import pandas as pd
 from psycopg2 import sql, extras
 
-
-
-#
 def is_valid_reddit_url(url):
     """Validate if URL is a legitimate Reddit URL"""
     parsed = urlparse(url)
@@ -158,7 +155,7 @@ talisman = Talisman(
 limiter = Limiter(
     get_remote_address,
     app=app,
-    default_limits=["200 per day", "10 per hour"],
+    default_limits=["200 per day", "1000 per hour"],
     storage_uri="memory://",
 )
 
@@ -168,11 +165,11 @@ limiter = Limiter(
 @app.route('/', methods=['GET', 'POST'])
 def index():
     if request.method == 'POST':
-        url = request.form['url']
+        search_query = request.form["search_query"]
 
-        # Validate Reddit URL
-        if not is_valid_reddit_url(url):
-            flash('Invalid Reddit URL provided. Please check the URL and try again.', 'error')
+        # search query validation 
+        if len(search_query) <= 8:
+            flash('Please enter a valid search query.', 'error')
             return render_template('index.html')
         
         try:
@@ -188,16 +185,44 @@ def index():
             if conn is None:
                 raise Exception("Could not connect to database. Please check database configuration.")
 
-            # Store comments in database
-            store_comments_for_url(url)
+            # --------- ////main from comment fetcher goes here to store the data in posts and comments_new
+            s= cf.get_post_details(search_query,post_limit=5)
+            s = sorted(s,key=lambda x: x['post_score'],reverse=True) # sort by score
+            # removing comment objects from the post data
+            posts_data = [{k:v for k,v in i.items() if k not in ['post_comments']} for i in s]
+            # convert to dataframe and formating
+            posts_df = pd.DataFrame(posts_data)
+            posts_df['post_created_utc'] = pd.to_datetime(posts_df['post_created_utc'],unit='s')
+            posts_df['search_query'] = search_query # add search query to the dataframe
+            # upserting posts data
+            upsert_table(conn, posts_df, "posts",["post_id"])
+
+            # ---- /// getting comments based on post data
+            comments_data = [cf.get_post_comments(i['post_comments']) for i in s]
+            comments_df  = pd.concat([pd.DataFrame(x) for x in comments_data])
+            # convert comment_created_utc to datetime
+            comments_df['comment_created_utc'] = pd.to_datetime(comments_df['comment_created_utc'],unit='s')
+
+            #upserting comments data
+            upsert_table(conn, comments_df, "comments_new",["comment_id"])
+            # --------- //// cf ends here
+
+
+            # Fetch comments from database that pertains to the search query
+            query = """ select * 
+                        from comments_new
+                        left join posts on 
+                        comments_new.post_id = posts.post_id 
+                        where posts.search_query = %s and comment_score > 1
+                        order by comment_score desc
+                        
+                        """
             
-            # Fetch comments from database
-            query = "SELECT comment, comment_level FROM Comments WHERE specific_url = %s LIMIT 10"
-            comments_df = query_db(conn, query, (url,))
-            
+            comments_df= query_db(conn, query, (search_query,))
+
             if comments_df is None or comments_df.empty:
                 raise Exception("No comments were retrieved from the database.")
-            
+                        
             # Process comments from database
             comments = []
             all_text = ""
@@ -247,5 +272,5 @@ def index():
 if __name__ == '__main__':
 
     debug_mode = os.environ.get("FLASK_ENV") != "production"
-    app.run(host="0.0.0.0", debug=debug_mode)
+    app.run(host="0.0.0.0", debug=debug_mode, port=5001)
 

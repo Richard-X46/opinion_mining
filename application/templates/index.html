@@ -128,9 +128,9 @@
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
 
             <div class="mb-3">
-                <label for="url" class="form-label">Enter Reddit URL:</label>
-                <input type="url" class="form-control" id="url" name="url" required
-                       placeholder="https://www.reddit.com/r/...">
+                <label for="search_query" class="form-label">Enter Search Query:</label>
+                <input type="text" class="form-control" id="search_query" name="search_query" required
+                    placeholder="Type your search query here...">
             </div>
             <div class="text-center">
                 <button type="submit" class="btn btn-primary">Analyze</button>
