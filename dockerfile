@@ -23,6 +23,11 @@ COPY . .
 # Set environment variables
 ENV FLASK_ENV=production
 ENV PYTHONPATH=/app 
+ENV PYTHONUNBUFFERED=1
+
+# logging
+ENV LOG_LEVEL=INFO
+
 
 # Create a non-root user and switch to it
 RUN useradd -m appuser && chown -R appuser:appuser /app
