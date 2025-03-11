@@ -21,47 +21,39 @@ import re
 import praw
 import pandas as pd
 from psycopg2 import sql, extras
+import openai
 
-
-
-#
-def is_valid_reddit_url(url):
-    """Validate if URL is a legitimate Reddit URL"""
-    parsed = urlparse(url)
-    return parsed.netloc in [
-        "reddit.com",
-        "www.reddit.com",
-        "old.reddit.com",
-    ] and re.match(r"^/r/[^/]+/comments/[^/]+(/[^/]+)?/?$", parsed.path)
-
-
-
-# Add this function at the top with other imports
 def generate_summary(comments_df, keywords, sentiment_stats):
-    # Get top 2-3 most representative comments
-    summary_comments = []
-    
-    # Get dominant sentiment
-    max_sentiment = max(sentiment_stats.items(), key=lambda x: x[1])[0]
-    
-    # Find comments that contain keywords and match dominant sentiment
-    for _, row in comments_df.iterrows():
-        comment = row['comment']
-        # Check if comment contains any keywords
-        if any(keyword.lower() in comment.lower() for keyword in keywords):
-            summary_comments.append(comment)
-            if len(summary_comments) >= 3:
-                break
-    
-    # Create summary
-    summary = f"Discussion shows {max_sentiment.lower()} sentiment ({sentiment_stats[max_sentiment]:.1f}%). "
-    summary += f"Key points discussed: {', '.join(keywords[:3])}. "
-    
-    if summary_comments:
-        summary += "\nKey insights: " + " ... ".join(summary_comments)
-    
-    # Add this return statement
+    # Combine comments into a single text
+    comments_text = " ".join(comments_df['comment'].tolist())
+
+    # Prepare the prompt for the LLM
+    prompt = f"""
+    The following are comments from a Reddit discussion:
+    {comments_text}
+
+    The dominant sentiment is {max(sentiment_stats.items(), key=lambda x: x[1])[0].lower()}.
+    The key topics discussed are: {', '.join(keywords[:3])}.
+
+    Summarize the discussion in 2-3 sentences, focusing on the key points and sentiment.
+    """
+
+    # Call the OpenAI API
+    openai.api_key = os.getenv("OPENAI_API_KEY")
+    response = openai.chat.completions.create(
+        model="gpt-3.5-turbo",
+        messages=[
+                {"role": "system", "content": "You are a helpful assistant that summarizes Reddit discussions."},
+                {"role": "user", "content": prompt}
+            ],
+        max_tokens=100,  # Limit the response length
+        temperature=0.7,  # Control creativity (0 = factual, 1 = creative)
+    )
+
+    # Extract and return the summary
+    summary = response.choices[0].message.content
     return summary
+
 
 # Add this function before store_comments_for_url
 def get_comment_level(comment):
@@ -169,11 +161,6 @@ limiter = Limiter(
 def index():
     if request.method == 'POST':
         url = request.form['url']
-
-        # Validate Reddit URL
-        if not is_valid_reddit_url(url):
-            flash('Invalid Reddit URL provided. Please check the URL and try again.', 'error')
-            return render_template('index.html')
         
         try:
             # Connect to database first to verify connection
