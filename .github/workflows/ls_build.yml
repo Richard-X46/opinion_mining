@@ -1,0 +1,43 @@
+name: Deploy to AWS Lightsail with GHCR
+
+on:
+  push:
+    branches:
+      - main  # Trigger workflow on push to main
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Log in to GitHub Container Registry
+        run: echo "${{ secrets.GHCR_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+
+      - name: Build Docker Image
+        run: |
+          docker build -t ghcr.io/${{ github.repository_owner }}/opinion-mining:latest .
+
+      - name: Push Docker Image to GHCR
+        run: |
+          docker push ghcr.io/${{ github.repository_owner }}/opinion-mining:latest
+
+  deploy:
+    needs: build-and-push
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: SSH into AWS Lightsail and Deploy
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.LIGHTSAIL_HOST }}
+          username: ${{ secrets.LIGHTSAIL_USERNAME }}
+          key: ${{ secrets.LIGHTSAIL_SSH_KEY }}
+          script: |
+            docker login ghcr.io -u ${{ github.actor }} --password ${{ secrets.GHCR_TOKEN }}
+            docker pull ghcr.io/${{ github.repository_owner }}/opinion-mining:latest
+            docker stop opinion-mining-container || true
+            docker rm opinion-mining-container || true
+            docker run -p 8080:5001 --env-file .env -d --name opinion-mining-container ghcr.io/${{ github.repository_owner }}/opinion-mining:latest
