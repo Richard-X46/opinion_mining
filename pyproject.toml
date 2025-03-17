@@ -23,4 +23,5 @@ dependencies = [
     "nltk>=3.9.1",
     "keybert>=0.9.0",
     "rank-bm25>=0.2.2",
+    "openai>=1.66.2",
 ]
