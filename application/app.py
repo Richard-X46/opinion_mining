@@ -154,9 +154,6 @@ limiter = Limiter(
     storage_uri="memory://",
 )
 
-
-
-
 @app.route('/', methods=['GET', 'POST'])
 def index():
     if request.method == 'POST':
@@ -253,7 +250,8 @@ def index():
                                 comments=comments,
                                 keywords=keywords,
                                 sentiment_stats=sentiment_stats,
-                                summary=summary)
+                                summary=summary,
+                                search_query=search_query)  # Add this line                    search_query=search_query)  # Add this line
             
         except praw.exceptions.InvalidURL:
             flash('Invalid Reddit URL provided. Please check the URL and try again.', 'error')
@@ -265,7 +263,7 @@ def index():
     return render_template('index.html')
 
 if __name__ == '__main__':
-
     debug_mode = os.environ.get("FLASK_ENV") != "production"
     app.run(host="0.0.0.0", debug=debug_mode, port=5001)
+
 
