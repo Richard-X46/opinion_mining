@@ -22,6 +22,7 @@ import praw
 import pandas as pd
 from psycopg2 import sql, extras
 import openai
+from scrapper.rating_system import calculate_rating
 
 def generate_summary(comments_df, keywords, sentiment_stats):
     # Combine comments into a single text
@@ -230,18 +231,27 @@ def index():
             
             # Analyze sentiment
             analyzer = SentimentAnalyzer()
-            sentiments = []
+            sentiment_results = []  # To store detailed sentiment analysis for rating calculation
             for comment in comments:
                 sentiment = analyzer.analyze_sentiment(comment['text'])
-                sentiments.append(sentiment)
-            
+                sentiment_label_map = {"Negative": 0, "Neutral": 1, "Positive": 2}
+                sentiment_label = sentiment_label_map[sentiment]
+                sentiment_results.append({
+                    'comment': comment['text'],
+                    'sentiment_label': sentiment_label
+                })
+
             # Calculate sentiment percentages
-            total = len(sentiments)
+            total = len(sentiment_results)
+            sentiments = [r['sentiment_label'] for r in sentiment_results]
             sentiment_stats = {
-                'Positive': sentiments.count('Positive') / total * 100,
-                'Neutral': sentiments.count('Neutral') / total * 100,
-                'Negative': sentiments.count('Negative') / total * 100
+                'Positive': sentiments.count(2) / total * 100,
+                'Neutral': sentiments.count(1) / total * 100,
+                'Negative': sentiments.count(0) / total * 100
             }
+
+            # Calculate website rating
+            rating = calculate_rating(sentiment_results)
             
             # Generate summary using our custom function instead of transformer
             summary = generate_summary(comments_df, keywords, sentiment_stats)
@@ -251,7 +261,8 @@ def index():
                                 keywords=keywords,
                                 sentiment_stats=sentiment_stats,
                                 summary=summary,
-                                search_query=search_query)  # Add this line                    search_query=search_query)  # Add this line
+                                search_query=search_query, # Add this line                    search_query=search_query)  # Add this line
+                                rating=rating)  
             
         except praw.exceptions.InvalidURL:
             flash('Invalid Reddit URL provided. Please check the URL and try again.', 'error')
@@ -265,5 +276,3 @@ def index():
 if __name__ == '__main__':
     debug_mode = os.environ.get("FLASK_ENV") != "production"
     app.run(host="0.0.0.0", debug=debug_mode, port=5001)
-
-
