@@ -8,7 +8,7 @@ import os
 from pathlib import Path
 sys.path.append(str(Path(__file__).parent.parent))
 import scrapper.comment_fetcher as cf
-from scrapper.keyword_extract import extract_keywords
+from scrapper.keyword_extract import extract_keywords_gpt
 from scrapper.sentiment_analysis import SentimentAnalyzer
 from scrapper.ls_psql import connect_to_db, upsert_table, query_db
 from dotenv import load_dotenv
@@ -229,7 +229,7 @@ def index():
                 all_text += row['comment'] + " "
             
             # Extract keywords
-            keywords = extract_keywords(all_text, top_n=10)
+            keywords = extract_keywords_gpt(all_text)
             
             # Analyze sentiment
             analyzer = SentimentAnalyzer()

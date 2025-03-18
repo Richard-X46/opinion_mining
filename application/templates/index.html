@@ -6,59 +6,66 @@
     <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
     <style>
         :root {
-            --primary-color: #8A2BE2;
-            --bg-color: #1E1E1E;
-            --text-color: #E0E0E0;
-            --border-color: #404040;
+            --primary-color: #4F46E5;
+            --bg-color: #F5F7FA;
+            --text-color: #1A1A1A;
+            --border-color: #E2E8F0;
+            --accent-color: #6D28D9;
+            --input-bg: #FFFFFF;
         }
         
         body { 
             background-color: var(--bg-color);
             color: var(--text-color);
-            font-family: 'JetBrains Mono', monospace;
-            line-height: 1.6;
+            font-family: 'Work Sans', sans-serif;
+            line-height: 1.8;
             min-height: 100vh;
-            padding: 20px;
+            padding: 40px 20px;
+            font-size: 1.1rem;
         }
         
         .container {
-            max-width: 800px;
-            background: rgba(30, 30, 30, 0.95);
-            padding: 30px;
+            max-width: 1000px;
+            background: var(--input-bg);
+            padding: 40px;
             border: 1px solid var(--border-color);
-            border-radius: 8px;
-            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-            margin-top: 50px;
+            border-radius: 16px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+            margin-top: 60px;
         }
         
         h1 {
             color: var(--primary-color);
             text-align: center;
-            font-size: 24px;
-            margin-bottom: 30px;
+            font-size: 2.8rem;
+            margin-bottom: 35px;
             font-weight: 700;
+            font-family: 'Space Mono', monospace;
+            letter-spacing: -1px;
         }
         
         .lead {
             color: var(--text-color);
-            font-size: 14px;
+            font-size: 1.2rem;
             margin-bottom: 30px;
-            opacity: 0.8;
+            opacity: 0.9;
+            font-weight: 400;
         }
         
         .form-control {
-            background: rgba(0, 0, 0, 0.2);
-            border: 1px solid var(--border-color);
+            background: var(--bg-color);
+            border: 2px solid var(--border-color);
             color: var(--text-color);
-            border-radius: 4px;
-            padding: 12px;
-            font-family: 'JetBrains Mono', monospace;
+            border-radius: 12px;
+            padding: 15px;
+            font-size: 1.1rem;
+            font-family: 'Work Sans', sans-serif;
         }
         
         .form-control:focus {
-            background: rgba(0, 0, 0, 0.3);
+            background: var(--input-bg);
             border-color: var(--primary-color);
-            box-shadow: 0 0 0 2px rgba(138, 43, 226, 0.2);
+            box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.2);
             color: var(--text-color);
         }
         
@@ -66,39 +73,36 @@
             background: var(--primary-color);
             border: none;
             color: white;
-            border-radius: 4px;
-            padding: 10px 30px;
-            font-family: 'JetBrains Mono', monospace;
-            font-size: 14px;
+            border-radius: 12px;
+            padding: 15px 35px;
+            font-family: 'Space Mono', monospace;
+            font-size: 1.1rem;
+            font-weight: 600;
             transition: all 0.3s ease;
-        }
-        
-        .btn-primary:hover {
-            background: #9D4EDD;
-            transform: translateY(-1px);
-            box-shadow: 0 4px 8px rgba(138, 43, 226, 0.2);
         }
         
         .terminal-line {
             position: relative;
-            padding-left: 20px;
-            margin-bottom: 8px;
-        }
-        
-        .terminal-line::before {
-            content: "→";
-            position: absolute;
-            left: 0;
-            color: var(--primary-color);
+            padding-left: 25px;
+            margin-bottom: 12px;
+            font-size: 1.15rem;
         }
         
         .terminal-alert {
-            background: rgba(255, 0, 0, 0.1);
-            border-left: 3px solid #ff4444;
-            color: #ff4444;
-            padding: 15px;
-            margin: 20px 0;
-            border-radius: 4px;
+            background: rgba(239, 68, 68, 0.1);
+            border-left: 4px solid #ef4444;
+            color: #991b1b;
+            padding: 20px;
+            margin: 25px 0;
+            border-radius: 12px;
+            font-size: 1.1rem;
+            font-weight: 500;
+        }
+
+        .form-label {
+            font-size: 1.15rem;
+            font-weight: 500;
+            margin-bottom: 12px;
         }
     </style>
 </head>
