@@ -125,6 +125,12 @@
             transform: translateY(-2px);
             background: #4c8a3f;
         }
+
+        .info-text {
+            color: var(--primary);
+            font-style: italic;
+            margin: 10px 0;
+        }
     </style>
 </head>
 <body>
@@ -133,7 +139,7 @@
             <h1>Analysis Results</h1>
             <div class="search-query">Search Query: "{{ search_query }}"</div>
 
-            <!-- New User Rating Section -->
+            <!-- User Rating Section -->
             <div class="user-rating" style="margin-top: 20px;">
                 <h2 style="font-size: 24px; color: var(--primary);">User Rating</h2>
                 <p style="font-size: 32px; font-weight: bold; color: var(--text-dark);">
@@ -191,6 +197,13 @@
                 </div>
             {% endfor %}
         </div>
+
+        <!-- Add the comment count here, at the bottom -->
+        {% if comments|length > 0 %}
+            <div class="card" style="text-align: center;">
+                <p class="info-text">Analysis based on {{ comments|length }} relevant comments from the discussion</p>
+            </div>
+        {% endif %}
 
         <div style="text-align: center; margin: 40px 0;">
             <a href="/" class="btn-primary">New Analysis</a>

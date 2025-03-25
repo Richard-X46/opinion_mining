@@ -206,40 +206,50 @@ def index():
             if conn is None:
                 raise Exception("Could not connect to database. Please check database configuration.")
 
-            # --------- ////main from comment fetcher goes here to store the data in posts and comments_new
-            s= cf.get_post_details(search_query,post_limit=5)
-            s = sorted(s,key=lambda x: x['post_score'],reverse=True) # sort by score
-            # removing comment objects from the post data
+            s = cf.get_post_details(search_query, post_limit=5)
+            if not s:
+                raise Exception("No posts found for the search query.")
+
+            s = sorted(s, key=lambda x: x['post_score'], reverse=True)
             posts_data = [{k:v for k,v in i.items() if k not in ['post_comments']} for i in s]
-            # convert to dataframe and formating
+            
+            # Process posts
             posts_df = pd.DataFrame(posts_data)
-            posts_df['post_created_utc'] = pd.to_datetime(posts_df['post_created_utc'],unit='s')
-            posts_df['search_query'] = search_query # add search query to the dataframe
-            # upserting posts data
-            upsert_table(conn, posts_df, "posts",["post_id"])
+            posts_df['post_created_utc'] = pd.to_datetime(posts_df['post_created_utc'], unit='s')
+            posts_df['search_query'] = search_query
+            upsert_table(conn, posts_df, "posts", ["post_id"])
 
-            # ---- /// getting comments based on post data
-            comments_data = [cf.get_post_comments(i['post_comments']) for i in s]
-            comments_df  = pd.concat([pd.DataFrame(x) for x in comments_data])
-            # convert comment_created_utc to datetime
-            comments_df['comment_created_utc'] = pd.to_datetime(comments_df['comment_created_utc'],unit='s')
+            # Process comments with better error handling
+            comments_data = []
+            for post in s:
+                post_comments = cf.get_post_comments(
+                    post['post_comments'],
+                    search_query=search_query,
+                    post_title=post['post_title']
+                )
+                if post_comments:  # Only add if we got comments
+                    comments_data.extend(post_comments)
 
-            #upserting comments data
-            upsert_table(conn, comments_df, "comments_new",["comment_id"])
-            # --------- //// cf ends here
+            if not comments_data:
+                raise Exception("No relevant comments found for the search query.")
 
+            comments_df = pd.DataFrame(comments_data)
+            comments_df['comment_created_utc'] = pd.to_datetime(comments_df['comment_created_utc'], unit='s')
+            
+            # Store filtered comments
+            upsert_table(conn, comments_df, "comments_new", ["comment_id"])
 
             # Fetch comments from database that pertains to the search query
-            query = """ select * 
-                        from comments_new
-                        left join posts on 
-                        comments_new.post_id = posts.post_id 
-                        where posts.search_query = %s and comment_score > 1
-                        order by comment_score desc
-                        
-                        """
+            query = """ 
+                select * 
+                from comments_new
+                left join posts on 
+                comments_new.post_id = posts.post_id 
+                where posts.search_query = %s and comment_score > 1
+                order by comment_score desc
+            """
             
-            comments_df= query_db(conn, query, (search_query,))
+            comments_df = query_db(conn, query, (search_query,))
 
             if comments_df is None or comments_df.empty:
                 raise Exception("No comments were retrieved from the database.")
@@ -259,7 +269,7 @@ def index():
             
             # Analyze sentiment
             analyzer = SentimentAnalyzer()
-            sentiment_results = []  # To store detailed sentiment analysis for rating calculation
+            sentiment_results = []
             for comment in comments:
                 sentiment = analyzer.analyze_sentiment(comment['text'])
                 sentiment_label_map = {"Negative": 0, "Neutral": 1, "Positive": 2}
@@ -281,7 +291,7 @@ def index():
             # Calculate website rating
             rating = calculate_rating(sentiment_results)
             
-            # Generate summary using our custom function instead of transformer
+            # Generate summary using our custom function
             summary = generate_summary(comments_df, keywords, sentiment_stats)
             
             # Analyze emotions in comments
@@ -295,14 +305,17 @@ def index():
                                 summary=summary,
                                 search_query=search_query,
                                 rating=rating,
-                                emotions=emotions)  # Add this line
-            
+                                emotions=emotions)
+
         except praw.exceptions.InvalidURL:
             flash('Invalid Reddit URL provided. Please check the URL and try again.', 'error')
             return render_template('index.html')
         except Exception as e:
             flash(f'An error occurred: {str(e)}', 'error')
             return render_template('index.html')
+        finally:
+            if 'conn' in locals() and conn:
+                conn.close()
     
     return render_template('index.html')
 

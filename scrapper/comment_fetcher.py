@@ -8,6 +8,10 @@ from googlesearch import search
 import logging
 import scrapper.ls_psql as psql
 from datetime import datetime
+import numpy as np
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.metrics.pairwise import cosine_similarity
+import re
 
 # Load environment variables from .env file
 load_dotenv()
@@ -137,108 +141,139 @@ def get_post_details(search_query:str,post_limit: int):
         logging.error(f"Error: {e}")
         return None
 
-def get_post_comments(comments:list):
+def get_post_comments(comments, search_query="", post_title=""):
     """
-    Get comments for a post and return them as a DataFrame
+    Get comments for a post and filter for relevance
     """
+    if not comments:
+        return []
+        
     try:
-        if len(comments) > 0:
-            logging.info(f"Found {len(comments)} comments for the post")
-
-            # Prepare comments data
-            comments_data = []
-
-            for comment in comments[:25]: # Limit to 25 comments
+        comments_data = []
+        
+        for comment in comments[:25]:  # Limit to top 25 comments
+            if not hasattr(comment, 'body') or not comment.body:
+                continue
+                
+            # Only add relevant comments
+            if is_comment_relevant(comment.body, search_query, post_title):
                 comments_data.append({
                     "comment_id": comment.id,
                     "comment_created_utc": comment.created_utc,
-
                     "comment": comment.body,
                     "comment_score": comment.score,
                     "comment_level": get_comment_level(comment),
                     "comment_parent_id": comment.parent_id,
                     "post_id": comment.submission.id,
                 })
-
-
-            # Convert to DataFrame
-           
-            return comments_data
         
-
-        else:
-            logging.info("No comments found for the post")
-            return None
-        
+        return comments_data if comments_data else []
         
     except Exception as e:
-        logging.error(f"Error: {e}")
-        return None
+        logging.error(f"Error in get_post_comments: {str(e)}")
+        return []
+
+def is_comment_relevant(comment: str, search_query: str, title: str, threshold: float = 0.1) -> bool:
+    """
+    Determine if a comment is relevant to the search query and post title.
+    """
+    try:
+        # Basic validation
+        if not comment or not isinstance(comment, str):
+            return False
+            
+        comment = comment.strip()
+        if len(comment) < 10:
+            return False
+
+        # Spam patterns check
+        spam_patterns = [
+            r'\[removed\]',
+            r'\[deleted\]',
+            r'^[^a-zA-Z]*$'
+        ]
+        
+        if any(re.search(pattern, comment, re.IGNORECASE) for pattern in spam_patterns):
+            return False
+
+        # Prepare reference text
+        reference_text = f"{search_query} {title}".strip()
+        if not reference_text:
+            return True  # If no reference text, keep the comment
+
+        # Calculate similarity
+        vectorizer = TfidfVectorizer(stop_words='english', min_df=1)
+        tfidf_matrix = vectorizer.fit_transform([reference_text, comment])
+        similarity = cosine_similarity(tfidf_matrix[0:1], tfidf_matrix[1:2])[0][0]
+        
+        return similarity >= threshold
+
+    except Exception as e:
+        logging.error(f"Error in relevance detection: {str(e)}")
+        return True  # Keep comment if analysis fails
 
 def main():
     # establishing connection to the database
     conn = psql.connect_to_db(host = os.getenv("HOST"),
-                                port = os.getenv("PORT"),
-                                database = os.getenv("DATABASE"),
-                                user = os.getenv("DB_USER"),
-                                password = os.getenv("PASSWORD"))
-
-
+                            port = os.getenv("PORT"),
+                            database = os.getenv("DATABASE"),
+                            user = os.getenv("DB_USER"),
+                            password = os.getenv("PASSWORD"))
 
     search_query = "crewai vs n8n"
 
     # ---- /// getting posts based on search query
-    s= get_post_details(search_query,post_limit=5)
-    s = sorted(s,key=lambda x: x['post_score'],reverse=True) # sort by score
+    s = get_post_details(search_query, post_limit=5)
+    s = sorted(s, key=lambda x: x['post_score'], reverse=True) # sort by score
     # removing comment objects from the post data
     posts_data = [{k:v for k,v in i.items() if k not in ['post_comments']} for i in s]
     # convert to dataframe and formating
     posts_df = pd.DataFrame(posts_data)
-    posts_df['post_created_utc'] = pd.to_datetime(posts_df['post_created_utc'],unit='s')
+    posts_df['post_created_utc'] = pd.to_datetime(posts_df['post_created_utc'], unit='s')
     posts_df['search_query'] = search_query # add search query to the dataframe
     # upserting posts data
-    psql.upsert_table(conn, posts_df, "posts",["post_id"])
+    psql.upsert_table(conn, posts_df, "posts", ["post_id"])
 
     # ---- /// getting comments based on post data
-    comments_data = [get_post_comments(i['post_comments']) for i in s]
-    comments_df  = pd.concat([pd.DataFrame(x) for x in comments_data])
+    comments_data = [get_post_comments(i['post_comments'], search_query, i['post_title']) for i in s]
+    comments_df = pd.concat([pd.DataFrame(x) for x in comments_data if x is not None])
     # convert comment_created_utc to datetime
-    comments_df['comment_created_utc'] = pd.to_datetime(comments_df['comment_created_utc'],unit='s')
+    comments_df['comment_created_utc'] = pd.to_datetime(comments_df['comment_created_utc'], unit='s')
 
-    #upserting comments data
-    psql.upsert_table(conn, comments_df, "comments_new",["comment_id"])
+    # upserting comments data
+    psql.upsert_table(conn, comments_df, "comments_new", ["comment_id"])
     psql.query_db(conn, "SELECT * FROM comments_new")
 
 
-
-
+# Remove or comment out the table creation code since it's not properly formatted
 # -----/// Creating table for posts and comments
-# create_table_query = """
-# CREATE TABLE IF NOT EXISTS posts (
-#     post_id VARCHAR(255) PRIMARY KEY,
-#     post_created_utc TIMESTAMP,
-#     post_title TEXT,
-#     post_score INTEGER,
-#     post_upvote_ratio FLOAT,
-#     post_num_comments INTEGER,
-#     post_url TEXT,
-#     search_query TEXT
-# );
-# """
-# psql.create_tables(conn, create_table_query)
-# create_table_query = """
-# CREATE TABLE IF NOT EXISTS comments_new (
-#     comment_id VARCHAR(255) PRIMARY KEY,
-#     comment_created_utc TIMESTAMP,
-#     comment TEXT,
-#     comment_score INTEGER,
-#     comment_level INTEGER,
-#     comment_parent_id VARCHAR(255),
-#     post_id VARCHAR(255)
-# );
-# """
-# psql.create_tables(conn, create_table_query)
-
+'''
+create_table_query = """
+CREATE TABLE IF NOT EXISTS posts (
+    post_id VARCHAR(255) PRIMARY KEY,
+    post_created_utc TIMESTAMP,
+    post_title TEXT,
+    post_score INTEGER,
+    post_upvote_ratio FLOAT,
+    post_num_comments INTEGER,
+    post_url TEXT,
+    search_query TEXT
+);
+"""
+psql.create_tables(conn, create_table_query)
+create_table_query = """
+CREATE TABLE IF NOT EXISTS comments_new (
+    comment_id VARCHAR(255) PRIMARY KEY,
+    comment_created_utc TIMESTAMP,
+    comment TEXT,
+    comment_score INTEGER,
+    comment_level INTEGER,
+    comment_parent_id VARCHAR(255),
+    post_id VARCHAR(255)
+);
+"""
+psql.create_tables(conn, create_table_query)
+'''
 
 if __name__ == "__main__":
     main()
