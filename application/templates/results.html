@@ -173,6 +173,16 @@
             <p>{{ summary }}</p>
         </div>
 
+        <!-- Add this new card -->
+        <div class="card">
+            <h2>Emotional Tone</h2>
+            <div class="emotions">
+                {% for emotion in emotions %}
+                    <span class="keyword">{{ emotion }}</span>
+                {% endfor %}
+            </div>
+        </div>
+
         <div class="card">
             <h2>Top Comments</h2>
             {% for comment in comments %}

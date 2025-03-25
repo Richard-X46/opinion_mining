@@ -55,6 +55,34 @@ def generate_summary(comments_df, keywords, sentiment_stats):
     summary = response.choices[0].message.content
     return summary
 
+# Add this function after generate_summary()
+def analyze_emotions(comments_text):
+    """Analyze emotions present in the comments using GPT-3.5"""
+    prompt = f"""
+    Analyze the emotional content in these Reddit comments and identify the main emotions present:
+    {comments_text}
+
+    List only the top 3-4 emotions that are most strongly expressed, from this set:
+    Frustration, Satisfaction, Joy, Sadness, Anger, Surprise, Disgust, Fear, Interest, Excitement
+
+    Return just the emotions as a comma-separated list, ordered by strength of presence.
+    """
+
+    try:
+        response = openai.chat.completions.create(
+            model="gpt-3.5-turbo",
+            messages=[
+                {"role": "system", "content": "You are an emotion analysis assistant. Identify emotions from text concisely."},
+                {"role": "user", "content": prompt}
+            ],
+            max_tokens=50,
+            temperature=0.3
+        )
+        emotions = response.choices[0].message.content.strip()
+        return [e.strip() for e in emotions.split(',')]
+    except Exception as e:
+        print(f"Error in emotion analysis: {e}")
+        return ["Unable to analyze emotions"]
 
 # Add this function before store_comments_for_url
 def get_comment_level(comment):
@@ -255,14 +283,19 @@ def index():
             
             # Generate summary using our custom function instead of transformer
             summary = generate_summary(comments_df, keywords, sentiment_stats)
+            
+            # Analyze emotions in comments
+            all_comments_text = " ".join(comments_df['comment'].tolist())
+            emotions = analyze_emotions(all_comments_text)
 
             return render_template('results.html',
                                 comments=comments,
                                 keywords=keywords,
                                 sentiment_stats=sentiment_stats,
                                 summary=summary,
-                                search_query=search_query, # Add this line                    search_query=search_query)  # Add this line
-                                rating=rating)  
+                                search_query=search_query,
+                                rating=rating,
+                                emotions=emotions)  # Add this line
             
         except praw.exceptions.InvalidURL:
             flash('Invalid Reddit URL provided. Please check the URL and try again.', 'error')
