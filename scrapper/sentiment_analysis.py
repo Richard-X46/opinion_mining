@@ -80,6 +80,49 @@ def analyze_comments():
     
     return results
 
+def analyze_unified_sentiment(comments_df):
+    """
+    Perform unified sentiment analysis that coordinates all sentiment-related outputs.
+    Returns a dictionary with coordinated sentiment information.
+    """
+    analyzer = SentimentAnalyzer()
+    
+    # Analyze each comment and store detailed results
+    detailed_results = []
+    for _, row in comments_df.iterrows():
+        comment_text = row['comment']
+        
+        # Get BERT sentiment
+        bert_sentiment = analyzer.analyze_sentiment(comment_text)
+        sentiment_label_map = {"Negative": 0, "Neutral": 1, "Positive": 2}
+        sentiment_score = sentiment_label_map[bert_sentiment]
+        
+        # Store the detailed analysis
+        detailed_results.append({
+            'text': comment_text,
+            'bert_sentiment': bert_sentiment,
+            'sentiment_score': sentiment_score
+        })
+    
+    # Calculate overall sentiment distribution
+    total = len(detailed_results)
+    sentiments = [r['sentiment_score'] for r in detailed_results]
+    
+    sentiment_stats = {
+        'Positive': sentiments.count(2) / total * 100,
+        'Neutral': sentiments.count(1) / total * 100,
+        'Negative': sentiments.count(0) / total * 100
+    }
+    
+    # Determine dominant sentiment
+    dominant_sentiment = max(sentiment_stats.items(), key=lambda x: x[1])[0]
+    
+    return {
+        'detailed_results': detailed_results,
+        'sentiment_stats': sentiment_stats,
+        'dominant_sentiment': dominant_sentiment
+    }
+
 if __name__ == "__main__":
     results = analyze_comments()
     

@@ -8,7 +8,7 @@ import os
 from pathlib import Path
 sys.path.append(str(Path(__file__).parent.parent))
 import scrapper.comment_fetcher as cf
-from scrapper.keyword_extract import extract_keywords_gpt
+from scrapper.keyword_extract import extract_keywords_gpt, extract_keywords_with_sentiment
 from scrapper.sentiment_analysis import SentimentAnalyzer
 from scrapper.ls_psql import connect_to_db, upsert_table, query_db
 from dotenv import load_dotenv
@@ -47,13 +47,52 @@ def generate_summary(comments_df, keywords, sentiment_stats):
                 {"role": "system", "content": "You are a helpful assistant that summarizes Reddit discussions."},
                 {"role": "user", "content": prompt}
             ],
-        max_tokens=100,  # Limit the response length
-        temperature=0.7,  # Control creativity (0 = factual, 1 = creative)
+        max_tokens=100, 
+        temperature=0.3, 
     )
 
     # Extract and return the summary
     summary = response.choices[0].message.content
     return summary
+
+def generate_cohesive_summary(comments_df, keywords, sentiment_stats, emotions):
+    """Generate a summary that ties together all sentiment-related components"""
+    
+    # Combine comments into a single text
+    comments_text = " ".join(comments_df['comment'].tolist())
+    
+    # Determine dominant sentiment and emotions
+    dominant_sentiment = max(sentiment_stats.items(), key=lambda x: x[1])[0]
+    emotion_list = ", ".join(emotions)
+    
+    prompt = f"""
+    Summarize this Reddit discussion considering ALL of the following analysis:
+    
+    1. The dominant sentiment is {dominant_sentiment} ({sentiment_stats[dominant_sentiment]:.1f}%)
+    2. Key emotions detected: {emotion_list}
+    3. Important keywords: {', '.join(keywords[:5])}
+    
+    Provide a 2-3 sentence summary that weaves together the sentiment, emotions, and key topics 
+    in a cohesive way. The summary should reflect the same emotional tone shown in the analysis.
+    
+    Discussion text:
+    {comments_text}
+    """
+
+    try:
+        response = openai.chat.completions.create(
+            model="gpt-3.5-turbo",
+            messages=[
+                {"role": "system", "content": "You are a discussion summarizer that ensures consistency between sentiment, emotions, and content."},
+                {"role": "user", "content": prompt}
+            ],
+            max_tokens=100,
+            temperature=0.3 
+        )
+        return response.choices[0].message.content
+    except Exception as e:
+        print(f"Error in summary generation: {e}")
+        return "Unable to generate summary"
 
 # Add this function after generate_summary()
 def analyze_emotions(comments_text):
@@ -84,6 +123,46 @@ def analyze_emotions(comments_text):
         print(f"Error in emotion analysis: {e}")
         return ["Unable to analyze emotions"]
 
+# Add this function after analyze_emotions()
+def analyze_emotions_with_sentiment(comments_text, sentiment_stats):
+    """Analyze emotions while considering sentiment distribution"""
+    
+    # Map sentiment ranges to emotion categories
+    high_negative = sentiment_stats['Negative'] > 40
+    high_positive = sentiment_stats['Positive'] > 40
+    
+    prompt = f"""
+    Analyze the emotional content in these Reddit comments, considering that the sentiment analysis shows:
+    Negative: {sentiment_stats['Negative']}%
+    Neutral: {sentiment_stats['Neutral']}%
+    Positive: {sentiment_stats['Positive']}%
+
+    List only the top 3-4 emotions that are most strongly expressed, ensuring they align with these sentiment percentages.
+    Choose from: Frustration, Satisfaction, Joy, Sadness, Anger, Surprise, Disgust, Fear, Interest, Excitement
+
+    The emotions must reflect the sentiment distribution above.
+    If negative sentiment is high ({high_negative}), include more negative emotions.
+    If positive sentiment is high ({high_positive}), include more positive emotions.
+    
+    Return just the emotions as a comma-separated list, ordered by strength of presence.
+    """
+
+    try:
+        response = openai.chat.completions.create(
+            model="gpt-3.5-turbo",
+            messages=[
+                {"role": "system", "content": "You are an emotion analysis assistant that ensures consistency with sentiment analysis."},
+                {"role": "user", "content": prompt}
+            ],
+            max_tokens=50,
+            temperature=0.3
+        )
+        emotions = response.choices[0].message.content.strip()
+        return [e.strip() for e in emotions.split(',')]
+    except Exception as e:
+        print(f"Error in emotion analysis: {e}")
+        return ["Unable to analyze emotions"]
+
 # Add this function before store_comments_for_url
 def get_comment_level(comment):
     """Get the nesting level of a comment"""
@@ -93,6 +172,17 @@ def get_comment_level(comment):
         level += 1
         parent = parent.parent()
     return level
+
+def format_comments_with_sentiment(comments_df, sentiment_results):
+    """Format comments with their sentiment information"""
+    formatted_comments = []
+    for i, row in comments_df.iterrows():
+        formatted_comments.append({
+            'text': row['comment'],
+            'level': row['comment_level'],
+            'sentiment': sentiment_results[i]['sentiment_label']
+        })
+    return formatted_comments
 
 def store_comments_for_url(url):
     """Store comments from a given URL in the database"""
@@ -256,30 +346,22 @@ def index():
                         
             # Process comments from database
             comments = []
-            all_text = ""
-            for _, row in comments_df.iterrows():
-                comments.append({
-                    'text': row['comment'],
-                    'level': row['comment_level']
-                })
-                all_text += row['comment'] + " "
+            all_text = " ".join(comments_df['comment'].tolist())
             
-            # Extract keywords
-            keywords = extract_keywords_gpt(all_text)
-            
-            # Analyze sentiment
+            # Unified sentiment analysis
             analyzer = SentimentAnalyzer()
             sentiment_results = []
-            for comment in comments:
-                sentiment = analyzer.analyze_sentiment(comment['text'])
+            for _, row in comments_df.iterrows():
+                comment_text = row['comment']
+                sentiment = analyzer.analyze_sentiment(comment_text)
                 sentiment_label_map = {"Negative": 0, "Neutral": 1, "Positive": 2}
                 sentiment_label = sentiment_label_map[sentiment]
                 sentiment_results.append({
-                    'comment': comment['text'],
+                    'comment': comment_text,
                     'sentiment_label': sentiment_label
                 })
 
-            # Calculate sentiment percentages
+            # Calculate sentiment statistics
             total = len(sentiment_results)
             sentiments = [r['sentiment_label'] for r in sentiment_results]
             sentiment_stats = {
@@ -287,16 +369,24 @@ def index():
                 'Neutral': sentiments.count(1) / total * 100,
                 'Negative': sentiments.count(0) / total * 100
             }
+            
+            # Determine dominant sentiment
+            dominant_sentiment = max(sentiment_stats.items(), key=lambda x: x[1])[0]
 
-            # Calculate website rating
+            # Extract sentiment-aware keywords
+            keywords = extract_keywords_with_sentiment(all_text, dominant_sentiment)
+            
+            # Analyze emotions with sentiment alignment
+            emotions = analyze_emotions_with_sentiment(all_text, sentiment_stats)
+            
+            # Generate cohesive summary
+            summary = generate_cohesive_summary(comments_df, keywords, sentiment_stats, emotions)
+
+            # Calculate website rating (existing code)
             rating = calculate_rating(sentiment_results)
-            
-            # Generate summary using our custom function
-            summary = generate_summary(comments_df, keywords, sentiment_stats)
-            
-            # Analyze emotions in comments
-            all_comments_text = " ".join(comments_df['comment'].tolist())
-            emotions = analyze_emotions(all_comments_text)
+
+            # Store comment structure for display
+            comments = format_comments_with_sentiment(comments_df, sentiment_results)
 
             return render_template('results.html',
                                 comments=comments,

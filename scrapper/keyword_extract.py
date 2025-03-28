@@ -68,3 +68,35 @@ def extract_keywords_gpt(text):
         print(f"Error in GPT keyword extraction: {str(e)}")
         # Fallback to BERT if GPT fails
         return extract_keywords_bert(text)
+
+def extract_keywords_with_sentiment(text, dominant_sentiment):
+    """Extract keywords while considering the overall sentiment"""
+    
+    prompt = f"""
+    Given the following text and its dominant sentiment ({dominant_sentiment}), 
+    extract exactly 15 keywords/phrases that reflect this sentiment.
+    Include both neutral descriptive terms and sentiment-aligned terms.
+    
+    Text: {text}
+    
+    Return only a comma-separated list of keywords, with no additional text.
+    Each keyword should optionally include a sentiment qualifier if relevant.
+    """
+    
+    try:
+        response = openai.chat.completions.create(
+            model="gpt-3.5-turbo",
+            messages=[
+                {"role": "system", "content": "You are a sentiment-aware keyword extraction assistant."},
+                {"role": "user", "content": prompt}
+            ],
+            temperature=0.3,
+            max_tokens=100
+        )
+        
+        keywords = [k.strip() for k in response.choices[0].message.content.split(',')][:15]
+        return keywords
+        
+    except Exception as e:
+        print(f"Error in sentiment-aware keyword extraction: {str(e)}")
+        return extract_keywords_gpt(text)  # Fallback to original method
