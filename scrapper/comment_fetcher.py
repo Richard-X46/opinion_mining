@@ -83,63 +83,44 @@ def store_comments_for_url(url):
         finally:
             conn.close()
 
-def search_reddit(keyword):
+def search_reddit(keyword, post_limit=5):
     """
-    Search for a keyword on Google and return the URLs of the search results from reddit.com.
+    Search Reddit directly using PRAW instead of Google.
     """
-    # Prepend "site:reddit.com " to the keyword to restrict results to reddit.com
-    query = f"site:reddit.com {keyword}"
-    search_results = []
-    for url in search(query):
-        search_results.append(url)
-    return search_results
-
-def get_post_details(search_query:str,post_limit: int):
-    """
-    Get post details for a search query and return them as a DataFrame
-
-    """
-
-    results = search_reddit(search_query)
-
-    results = results[:post_limit]
-    # log number of links
-    logging.info(f"Found {len(results)} links")
-
-
+    results = []
     try:
-        if len(results) > 0:
-
-            # Prepare post data
-            post_data = []
-
-
-            for i in results:
-                post = reddit.submission(url=i)
-                post.comments.replace_more(limit=None)
-                # fetch all comments
-
-                post_data.append( {
-                    "post_id": post.id,
-                    "post_created_utc": post.created_utc,
-                    "post_title": post.title,
-                    "post_score": post.score,
-                    "post_upvote_ratio": post.upvote_ratio,
-                    "post_num_comments": post.num_comments,
-                    "post_url": post.url,
-                    "post_comments": post.comments.list(),
-                })
-            
-            return post_data
-        else:
-            logging.info("No posts found for the search query")
-            return None
-
-
-
+        for submission in reddit.subreddit("all").search(keyword, limit=post_limit, sort="relevance"):
+            results.append(submission)
     except Exception as e:
-        logging.error(f"Error: {e}")
+        logging.error(f"Reddit search error: {e}")
+    return results
+
+def get_post_details(search_query: str, post_limit: int):
+    """
+    Get post details for a search query directly from Reddit using PRAW.
+    """
+    posts = search_reddit(search_query, post_limit)
+
+    if not posts:
+        logging.info("No posts found for the search query")
         return None
+
+    post_data = []
+
+    for post in posts:
+        post.comments.replace_more(limit=None)  # Flatten comments
+        post_data.append({
+            "post_id": post.id,
+            "post_created_utc": post.created_utc,
+            "post_title": post.title,
+            "post_score": post.score,
+            "post_upvote_ratio": post.upvote_ratio,
+            "post_num_comments": post.num_comments,
+            "post_url": post.url,
+            "post_comments": post.comments.list(),
+        })
+
+    return post_data
 
 def get_post_comments(comments, search_query="", post_title=""):
     """
