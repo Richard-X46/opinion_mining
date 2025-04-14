@@ -15,21 +15,13 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Set up Docker Buildx
-        run: |
-          # Set up Docker Buildx for faster builds
-          docker buildx create --use
+        run: docker buildx create --use
 
       - name: Log in to GitHub Container Registry
         run: echo "${{ secrets.GHCR_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
 
       - name: Build Docker Image
-        run: |
-          # Force a rebuild and ensure the correct build context
-          docker buildx build \
-            --platform linux/amd64,linux/arm64 \
-            --no-cache \  # Force rebuild
-            -t ghcr.io/${{ github.repository_owner }}/opinion-mining:latest \
-            --push .  # Ensure the build context is set to the current directory
+        run: docker buildx build --platform linux/amd64,linux/arm64 --no-cache -t ghcr.io/${{ github.repository_owner }}/opinion-mining:latest --push .
 
   deploy:
     needs: build-and-push
@@ -43,15 +35,10 @@ jobs:
           username: ${{ secrets.LIGHTSAIL_USERNAME }}
           key: ${{ secrets.LIGHTSAIL_SSH_KEY }}
           script: |
-            # Login to GHCR and pull the latest image
             docker login ghcr.io -u ${{ github.actor }} --password-stdin <<< "${{ secrets.GHCR_TOKEN }}"
             docker pull ghcr.io/${{ github.repository_owner }}/opinion-mining:latest
-
-            # Stop and remove the old container, if any
             if docker ps -q --filter "name=opinion-mining-container"; then
               docker stop opinion-mining-container
               docker rm opinion-mining-container
             fi
-
-            # Run the new container
             docker run -p 8080:5001 --env-file .env -d --name opinion-mining-container ghcr.io/${{ github.repository_owner }}/opinion-mining:latest
