@@ -89,11 +89,14 @@ def analyze_emotions_with_sentiment(comments_text, sentiment_stats):
     Neutral: {sentiment_stats['Neutral']}%
     Positive: {sentiment_stats['Positive']}%
 
-    List top 3–4 emotions (e.g., Joy, Anger, Sadness, Excitement) reflecting the sentiment distribution.
+    List top emotions (e.g., Joy, Anger, Sadness, Excitement) reflecting the sentiment distribution.
     More negative emotions if negative is high, and vice versa.
     
     Comments:
     {comments_text}
+    
+    Return only a comma-separated list of keywords, with no additional text.
+    Each keyword should optionally include a sentiment qualifier if relevant.
     """
 
     try:
@@ -106,7 +109,7 @@ def analyze_emotions_with_sentiment(comments_text, sentiment_stats):
             max_tokens=50,
             temperature=0.3
         )
-        return [e.strip() for e in response.choices[0].message.content.strip().split(',')]
+        return [e.strip() for e in response.choices[0].message.content.strip().split(',')][1:]
     except Exception as e:
         print(f"Emotion analysis error: {e}")
         return ["Unable to analyze emotions"]
