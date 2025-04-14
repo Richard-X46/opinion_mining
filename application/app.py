@@ -46,7 +46,7 @@ talisman = Talisman(
         "script-src": "'self' 'unsafe-inline'",
         "style-src": "'self' 'unsafe-inline' https://cdn.jsdelivr.net https://fonts.googleapis.com",
     },
-    force_https=True
+    force_https=False
 )
 
 limiter = Limiter(
