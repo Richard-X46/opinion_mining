@@ -24,12 +24,12 @@ jobs:
 
       - name: Build Docker Image
         run: |
-          # Use BuildKit, cache from previous builds if available
+          # Force a rebuild and ensure the correct build context
           docker buildx build \
             --platform linux/amd64,linux/arm64 \
-            --no-cache \
+            --no-cache \  # Force rebuild
             -t ghcr.io/${{ github.repository_owner }}/opinion-mining:latest \
-            --push .
+            --push .  # Ensure the build context is set to the current directory
 
   deploy:
     needs: build-and-push
