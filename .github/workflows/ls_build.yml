@@ -27,9 +27,9 @@ jobs:
           # Use BuildKit, cache from previous builds if available
           docker buildx build \
             --platform linux/amd64,linux/arm64 \
-            --no-cache \  # Force rebuild
+            --no-cache \
             -t ghcr.io/${{ github.repository_owner }}/opinion-mining:latest \
-            --push .  # Specify the build context here
+            --push .
 
   deploy:
     needs: build-and-push
@@ -48,8 +48,10 @@ jobs:
             docker pull ghcr.io/${{ github.repository_owner }}/opinion-mining:latest
 
             # Stop and remove the old container, if any
-            docker stop opinion-mining-container || true
-            docker rm opinion-mining-container || true
+            if docker ps -q --filter "name=opinion-mining-container"; then
+              docker stop opinion-mining-container
+              docker rm opinion-mining-container
+            fi
 
             # Run the new container
             docker run -p 8080:5001 --env-file .env -d --name opinion-mining-container ghcr.io/${{ github.repository_owner }}/opinion-mining:latest
