@@ -27,8 +27,9 @@ jobs:
           # Use BuildKit, cache from previous builds if available
           docker buildx build \
             --platform linux/amd64,linux/arm64 \
-            --cache-from=ghcr.io/${{ github.repository_owner }}/opinion-mining:latest \
-            --cache-to=type=inline \
+          # --cache-from=ghcr.io/${{ github.repository_owner }}/opinion-mining:latest \
+          #--cache-to=type=inline \
+            --no-cache \
             -t ghcr.io/${{ github.repository_owner }}/opinion-mining:latest \
             --push .
 
