@@ -210,14 +210,20 @@ def index():
 
             # Step 5: Sentiment + Emotion + Keywords
             analyzer = SentimentAnalyzer()
-            sentiment_results = []
-            for _, row in comments_df.iterrows():
-                sentiment = analyzer.analyze_sentiment(row['comment'])
-                label_map = {"Negative": 0, "Neutral": 1, "Positive": 2}
-                sentiment_results.append({
-                    'comment': row['comment'],
+            comments_list = comments_df['comment'].tolist()
+            
+            # Process all comments in a single batch
+            sentiment_labels = analyzer.analyze_sentiment_batch(comments_list)
+            
+            # Map sentiments to numerical values
+            label_map = {"NEGATIVE": 0, "NEUTRAL": 1, "POSITIVE": 2}
+            sentiment_results = [
+                {
+                    'comment': comment,
                     'sentiment_label': label_map[sentiment]
-                })
+                }
+                for comment, sentiment in zip(comments_list, sentiment_labels)
+            ]
 
             total = len(sentiment_results)
             sentiments = [r['sentiment_label'] for r in sentiment_results]

@@ -17,97 +17,26 @@ class SentimentAnalyzer:
     def __init__(self):
         self.model = "llama3-70b-8192"  # Or "mixtral-8x7b-32768"
 
-    def analyze_sentiment(self, text):
-        """
-        Analyze sentiment of a given comment using Groq's LLM.
-        Returns one of: 'Positive', 'Neutral', 'Negative'
-        """
-        prompt = f"""
-        Determine the sentiment of the following Reddit comment.
-        Respond with one word only: Positive, Neutral, or Negative.
-
-        Comment: \"{text.strip()}\"
-        """
-
+    def analyze_sentiment_batch(self, comments, batch_size=10):
+        """Analyze sentiment for multiple comments in a single API call"""
+        combined_text = "\n---\n".join(comments)
+        
         try:
             response = client.chat.completions.create(
-                model=self.model,
+                model="llama3-70b-8192",
                 messages=[
-                    {"role": "system", "content": "You are a sentiment analysis assistant."},
-                    {"role": "user", "content": prompt}
+                    {"role": "system", "content": "Analyze the sentiment of each comment. Reply with only comma-separated values: NEGATIVE, NEUTRAL, or POSITIVE"},
+                    {"role": "user", "content": combined_text}
                 ],
-                max_tokens=1,
-                temperature=0
+                max_tokens=100,
+                temperature=0.1
             )
-            result = response.choices[0].message.content.strip()
-            return result if result in ["Positive", "Neutral", "Negative"] else "Neutral"
+            
+            results = response.choices[0].message.content.strip().split(',')
+            return [result.strip().upper() for result in results]
         except Exception as e:
-            print(f"Sentiment analysis error: {e}")
-            return "Neutral"
-
-def fetch_comments_from_db():
-    try:
-        conn = psycopg2.connect(
-            host=os.getenv("HOST"),
-            port=os.getenv("PORT"),
-            database=os.getenv("DATABASE"),
-            user=os.getenv("USER"),
-            password=os.getenv("PASSWORD")
-        )
-        query = "SELECT * FROM Comments"
-        df = pd.read_sql_query(query, conn)
-        conn.close()
-        return df
-    except Exception as e:
-        print(f"Database error: {e}")
-        return pd.DataFrame()
-
-def analyze_comments():
-    analyzer = SentimentAnalyzer()
-    df = fetch_comments_from_db()
-    results = []
-
-    if not df.empty:
-        for index, row in df.iterrows():
-            sentiment = analyzer.analyze_sentiment(row['comment'])
-            results.append({
-                'comment': row['comment'],
-                'sentiment': sentiment
-            })
-            print(f"Comment: {row['comment'][:100]}...\nSentiment: {sentiment}\n")
-
-    return results
-
-def analyze_unified_sentiment(comments_df):
-    analyzer = SentimentAnalyzer()
-    detailed_results = []
-    sentiment_label_map = {"Negative": 0, "Neutral": 1, "Positive": 2}
-
-    for _, row in comments_df.iterrows():
-        sentiment = analyzer.analyze_sentiment(row['comment'])
-        sentiment_score = sentiment_label_map[sentiment]
-        detailed_results.append({
-            'text': row['comment'],
-            'sentiment': sentiment,
-            'sentiment_score': sentiment_score
-        })
-
-    total = len(detailed_results)
-    sentiments = [r['sentiment_score'] for r in detailed_results]
-    
-    sentiment_stats = {
-        'Positive': sentiments.count(2) / total * 100,
-        'Neutral': sentiments.count(1) / total * 100,
-        'Negative': sentiments.count(0) / total * 100
-    }
-
-    dominant_sentiment = max(sentiment_stats.items(), key=lambda x: x[1])[0]
-
-    return {
-        'detailed_results': detailed_results,
-        'sentiment_stats': sentiment_stats,
-        'dominant_sentiment': dominant_sentiment
-    }
+            print(f"Batch sentiment analysis error: {e}")
+            return ['NEUTRAL'] * len(comments)  # Fallback to neutral
 
 if __name__ == "__main__":
     results = analyze_comments()
