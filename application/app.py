@@ -21,7 +21,7 @@ from scrapper.keyword_extract import extract_keywords_with_sentiment
 from scrapper.sentiment_analysis import SentimentAnalyzer
 from scrapper.ls_psql import connect_to_db, upsert_table, query_db
 from scrapper.rating_system import calculate_rating
-
+from loguru import logger
 # Load environment variables
 load_dotenv()
 client = openai.OpenAI(
@@ -32,6 +32,13 @@ client = openai.OpenAI(
 #Check
 #print("Using Groq API base:", openai.api_base)
 #print("Key prefix:", openai.api_key[:5])
+
+# logger setup
+logger.add(
+    sys.stderr,
+    level="INFO",
+    format="{time} {level} {message}"
+)
 
 # Flask app setup
 app = Flask(__name__)
@@ -67,19 +74,44 @@ def get_comment_level(comment):
         parent = parent.parent()
     return level
 
+
 def format_comments_with_sentiment(comments_df, sentiment_results):
     """Format comments with sentiment labels and levels"""
-    return [
-        {
-            'text': row['comment'],
-            'level': row['comment_level'],
-            'sentiment': sentiment_results[i]['sentiment_label']
-        }
-        for i, row in comments_df.iterrows()
-    ]
+    formatted_comments = []
+    
+    for i, row in comments_df.iterrows():
+        try:
+            # Check if we have a sentiment result for this index
+            if i < len(sentiment_results):
+                formatted_comments.append({
+                    'text': row['comment'],
+                    'level': row['comment_level'],
+                    'sentiment': sentiment_results[i]['sentiment_label']
+                })
+            else:
+                # If we don't have a sentiment result, use neutral
+                logger.warning(f"No sentiment result for comment {i}, using neutral")
+                formatted_comments.append({
+                    'text': row['comment'],
+                    'level': row['comment_level'],
+                    'sentiment': 1  # NEUTRAL
+                })
+        except Exception as e:
+            logger.error(f"Error formatting comment {i}: {e}")
+            formatted_comments.append({
+                'text': row['comment'],
+                'level': row.get('comment_level', 0),
+                'sentiment': 1  # NEUTRAL
+            })
+    
+    return formatted_comments
 
 def analyze_emotions_with_sentiment(comments_text, sentiment_stats):
     """Use LLM to analyze emotions based on sentiment distribution"""
+    # Truncate comments_text to avoid token limit errors
+    truncated_text = comments_text[:15000] if len(comments_text) > 15000 else comments_text
+    
+    # Check if high negative or positive
     high_negative = sentiment_stats['Negative'] > 40
     high_positive = sentiment_stats['Positive'] > 40
 
@@ -93,13 +125,14 @@ def analyze_emotions_with_sentiment(comments_text, sentiment_stats):
     More negative emotions if negative is high, and vice versa.
     
     Comments:
-    {comments_text}
+    {truncated_text}
     
     Return only a comma-separated list of keywords, with no additional text.
     Each keyword should optionally include a sentiment qualifier if relevant.
     """
 
     try:
+        logger.info(f"Sending request to analyze emotions with sentiment - comment length: {len(comments_text)}")
         response = client.chat.completions.create(
             model="llama3-70b-8192",
             messages=[
@@ -109,28 +142,100 @@ def analyze_emotions_with_sentiment(comments_text, sentiment_stats):
             max_tokens=50,
             temperature=0.3
         )
-        return [e.strip() for e in response.choices[0].message.content.strip().split(',')][1:]
+        
+        # Add defensive check in case response has no choices
+        if not response.choices:
+            logger.error("Emotion analysis returned no choices")
+            return ["Unable to analyze emotions"]
+            
+        result = response.choices[0].message.content.strip()
+        logger.info(f"Raw emotion analysis result: {result}")
+        
+        # Handle empty result
+        if not result:
+            logger.error("Emotion analysis returned empty result")
+            return ["Unable to analyze emotions"]
+            
+        # Sanitize result to make sure we're only getting a comma-separated list
+        if ":" in result or "\n" in result:
+            # Extract only what appears to be the actual list
+            parts = result.split(":")
+            if len(parts) > 1:
+                result = parts[-1].strip()
+            else:
+                # If splitting by : doesn't work, try to remove any headings/prefixes
+                result = result.split("\n")[-1].strip()
+                
+        # Another defensive check for result after sanitization
+        if not result:
+            logger.error("Emotion analysis result was empty after sanitization")
+            return ["Unable to analyze emotions"]
+            
+        # Split by comma and filter out empty entries
+        emotions = [e.strip() for e in result.split(',') if e.strip()]
+        
+        # If we still have no emotions, return a default
+        if not emotions:
+            logger.error("No emotions found after splitting")
+            return ["Unable to analyze emotions"]
+            
+        return emotions
+        
     except Exception as e:
-        print(f"Emotion analysis error: {e}")
+        logger.error(f"Emotion analysis error: {e}")
         return ["Unable to analyze emotions"]
+
+
 
 def generate_cohesive_summary(comments_df, keywords, sentiment_stats, emotions):
     """Use GPT to generate a cohesive summary based on analysis"""
-    comments_text = " ".join(comments_df['comment'].tolist())
+    # Log the comment count and length of comments_text
+    logger.info(f"Number of comments: {len(comments_df)}")
+
+    # Reduce text size by taking only top comments
+    if len(comments_df) > 20:
+        top_comments = comments_df.sort_values('comment_score', ascending=False).head(20)
+        comments_text = " ".join(top_comments['comment'].tolist())
+    else:
+        comments_text = " ".join(comments_df['comment'].tolist())
+    
+    # Further truncate if needed
+    if len(comments_text) > 10000:
+        comments_text = comments_text[:10000] + "..."
+    
+    logger.info(f"Length of comments text: {len(comments_text)}")
+    
+    # Add defensive check for empty or None sentiment_stats
+    if not sentiment_stats:
+        sentiment_stats = {'Neutral': 100}
+    
     dominant_sentiment = max(sentiment_stats.items(), key=lambda x: x[1])[0]
+    
+    # Add defensive check for empty or None emotions
+    if not emotions or not isinstance(emotions, list):
+        emotions = ["Unable to analyze emotions"]
+    
     emotion_list = ", ".join(emotions)
+    
+    # Add defensive check for empty or None keywords
+    if not keywords or not isinstance(keywords, list):
+        keywords = ["No keywords available"]
+    
+    # Safely get up to 5 keywords, or fewer if less are available
+    keyword_list = ", ".join(keywords[:5] if len(keywords) >= 5 else keywords)
 
     prompt = f"""
     Summarize this Reddit discussion in 2–3 sentences, incorporating:
     - Dominant sentiment: {dominant_sentiment} ({sentiment_stats[dominant_sentiment]:.1f}%)
     - Emotions: {emotion_list}
-    - Keywords: {', '.join(keywords[:5])}
+    - Keywords: {keyword_list}
 
     Text:
     {comments_text}
     """
 
     try:
+        logger.info("Sending summary generation request")
         response = client.chat.completions.create(
             model="llama3-70b-8192",
             messages=[
@@ -140,9 +245,17 @@ def generate_cohesive_summary(comments_df, keywords, sentiment_stats, emotions):
             max_tokens=100,
             temperature=0.3
         )
-        return response.choices[0].message.content.strip()
+        
+        if not response.choices:
+            logger.error("Summary generation returned no choices")
+            return "Unable to generate summary"
+            
+        summary = response.choices[0].message.content.strip()
+        logger.info("Summary generation successful")
+        return summary
+        
     except Exception as e:
-        print(f"Summary generation error: {e}")
+        logger.error(f"Summary generation error: {e}")
         return "Unable to generate summary"
 
 # ------------------- Main Route -------------------
@@ -150,7 +263,9 @@ def generate_cohesive_summary(comments_df, keywords, sentiment_stats, emotions):
 @app.route('/', methods=['GET', 'POST'])
 def index():
     if request.method == 'POST':
+        logger.info("Received POST request")
         search_query = request.form.get("search_query", "").strip()
+        logger.info(f"Search query: {search_query}")
 
         if len(search_query) <= 8:
             flash('Please enter a more descriptive query.', 'error')
@@ -158,6 +273,7 @@ def index():
 
         try:
             # Step 1: DB connection
+            logger.info("Connecting to database")
             conn = connect_to_db(
                 os.getenv("HOST"),
                 os.getenv("PORT"),
@@ -169,7 +285,7 @@ def index():
                 raise Exception("Database connection failed.")
 
             # Step 2: Reddit post fetch + store
-            posts = cf.get_post_details(search_query, post_limit=5)
+            posts = cf.get_post_details(search_query, post_limit=3)
             if not posts:
                 raise Exception("No Reddit posts found for query.")
 
@@ -177,8 +293,11 @@ def index():
             posts_df = pd.DataFrame([{k: v for k, v in p.items() if k != 'post_comments'} for p in posts])
             posts_df['post_created_utc'] = pd.to_datetime(posts_df['post_created_utc'], unit='s')
             posts_df['search_query'] = search_query
-            upsert_table(conn, posts_df, "posts", ["post_id"])
+            logger.info(f"Fetched {len(posts_df)} posts")
+            # Store posts in DB
 
+            upsert_table(conn, posts_df, "posts", ["post_id"])
+            logger.info("Posts stored in database")
             # Step 3: Comment fetch + store
             comments_data = []
             for post in posts:
@@ -194,7 +313,7 @@ def index():
             comments_df = pd.DataFrame(comments_data)
             comments_df['comment_created_utc'] = pd.to_datetime(comments_df['comment_created_utc'], unit='s')
             upsert_table(conn, comments_df, "comments_new", ["comment_id"])
-
+            logger.info(f"Fetched and stored {len(comments_df)} comments")
             # Step 4: Load stored comments for query
             query = """
                 SELECT * FROM comments_new
@@ -203,12 +322,18 @@ def index():
                 ORDER BY comment_score DESC
             """
             comments_df = query_db(conn, query, (search_query,))
+
+            # downsize the comments_df 
+            # comments_df = comments_df.sample(frac=0.5, random_state=1)  # downsize to 50% of the original
+
             if comments_df is None or comments_df.empty:
+                logger.warning("No comments retrieved from DB.")
                 raise Exception("No comments retrieved from DB.")
 
             all_text = " ".join(comments_df['comment'].tolist())
 
             # Step 5: Sentiment + Emotion + Keywords
+            logger.info("Analyzing sentiment and emotions")
             analyzer = SentimentAnalyzer()
             comments_list = comments_df['comment'].tolist()
             
@@ -217,14 +342,27 @@ def index():
             
             # Map sentiments to numerical values
             label_map = {"NEGATIVE": 0, "NEUTRAL": 1, "POSITIVE": 2}
-            sentiment_results = [
-                {
-                    'comment': comment,
-                    'sentiment_label': label_map[sentiment]
-                }
-                for comment, sentiment in zip(comments_list, sentiment_labels)
-            ]
-
+            sentiment_results = []
+            for i, (comment, sentiment) in enumerate(zip(comments_list, sentiment_labels)):
+                try:
+                    # Check if sentiment is valid
+                    if isinstance(sentiment, str) and sentiment in label_map:
+                        sentiment_label = label_map[sentiment]
+                    else:
+                        logger.warning(f"Invalid sentiment value: '{sentiment}', defaulting to NEUTRAL")
+                        sentiment_label = 1  # Default to neutral
+                        
+                    sentiment_results.append({
+                        'comment': comment,
+                        'sentiment_label': sentiment_label
+                    })
+                except Exception as e:
+                    logger.error(f"Error processing sentiment for comment {i}: {e}")
+                    # Add a default neutral sentiment
+                    sentiment_results.append({
+                        'comment': comment,
+                        'sentiment_label': 1  # NEUTRAL
+                    })
             total = len(sentiment_results)
             sentiments = [r['sentiment_label'] for r in sentiment_results]
             sentiment_stats = {
@@ -232,13 +370,29 @@ def index():
                 'Neutral': sentiments.count(1) / total * 100,
                 'Negative': sentiments.count(0) / total * 100
             }
+            logger.info(f"Sentiment analysis completed: {sentiment_stats}")
+            # Step 6: Generate summary and keywords
+            logger.info("Generating summary and keywords")
+            try:
+                logger.info("Extracting keywords with sentiment")
+                keywords = extract_keywords_with_sentiment(all_text, max(sentiment_stats, key=sentiment_stats.get))
+                
+                # Ensure we have valid keywords
+                if not keywords or not isinstance(keywords, list):
+                    logger.warning("No valid keywords returned, using default")
+                    keywords = ["No keywords available"]
+                    
+                logger.info(f"Extracted {len(keywords)} keywords")
+            except Exception as e:
+                logger.error(f"Keyword extraction error: {e}")
+                keywords = ["No keywords available"]
 
-            keywords = extract_keywords_with_sentiment(all_text, max(sentiment_stats, key=sentiment_stats.get))
+
             emotions = analyze_emotions_with_sentiment(all_text, sentiment_stats)
             summary = generate_cohesive_summary(comments_df, keywords, sentiment_stats, emotions)
             rating = calculate_rating(sentiment_results)
             comments = format_comments_with_sentiment(comments_df, sentiment_results)
-
+            logger.info("Summary and keywords generated and rendered to template") 
             return render_template('results.html',
                                    comments=comments,
                                    keywords=keywords,

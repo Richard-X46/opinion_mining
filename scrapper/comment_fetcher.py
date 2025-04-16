@@ -83,7 +83,7 @@ def store_comments_for_url(url):
         finally:
             conn.close()
 
-def search_reddit(keyword, post_limit=5):
+def search_reddit(keyword, post_limit=3):
     """
     Search Reddit directly using PRAW instead of Google.
     """
@@ -132,7 +132,7 @@ def get_post_comments(comments, search_query="", post_title=""):
     try:
         comments_data = []
         
-        for comment in comments[:25]:  # Limit to top 25 comments
+        for comment in comments[:50]:  
             if not hasattr(comment, 'body') or not comment.body:
                 continue
                 
