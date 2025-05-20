@@ -49,7 +49,7 @@ This project is actively maintained and deployed in production. The live applica
 
 ## **Live App**  
 
-🔗 **Try it here:** [Opinion Mining](http://lumicore.duckdns.org:8080/)
+🔗 **Try it here:** [Opinion Mining](http://lumicore.duckdns.org)
 
 ## License
 
