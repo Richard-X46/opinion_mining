@@ -7,15 +7,22 @@ from dotenv import load_dotenv
 # Load environment variables
 load_dotenv()
 
-# Groq API client setup
-client = openai.OpenAI(
-    base_url="https://api.groq.com/openai/v1",
-    api_key=os.getenv("GROQ_API_KEY")
-)
 
 class SentimentAnalyzer:
     def __init__(self):
-        self.model = "llama3-70b-8192"  # Or "mixtral-8x7b-32768"
+        # Don't initialize client in constructor
+        self.model = "llama3-70b-8192"
+        self._client = None
+
+    @property
+    def client(self):
+        # Lazy initialization of client
+        if self._client is None:
+            self._client = openai.OpenAI(
+                base_url="https://api.groq.com/openai/v1",
+                api_key=os.getenv("GROQ_API_KEY"),
+            )
+        return self._client
 
     def analyze_sentiment_batch(self, comments, batch_size=10):
         """Analyze sentiment for multiple comments in a single API call"""
@@ -32,7 +39,7 @@ class SentimentAnalyzer:
         combined_text = "\n---\n".join(comments)
 
         try:
-            response = client.chat.completions.create(
+            response = self.client.chat.completions.create(
                 model="llama3-70b-8192",
                 messages=[
                     {

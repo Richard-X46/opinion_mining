@@ -15,23 +15,47 @@ from psycopg2 import sql, extras
 # Add scrapper module path
 sys.path.append(str(Path(__file__).parent.parent))
 
-# Project modules
-import scrapper.comment_fetcher as cf
-from scrapper.keyword_extract import extract_keywords_with_sentiment
-from scrapper.sentiment_analysis import SentimentAnalyzer
-from scrapper.ls_psql import connect_to_db, upsert_table, query_db
-from scrapper.rating_system import calculate_rating
+# # Project modules
+# import scrapper.comment_fetcher as cf
+# from scrapper.keyword_extract import extract_keywords_with_sentiment
+# from scrapper.sentiment_analysis import SentimentAnalyzer
+# from scrapper.ls_psql import connect_to_db, upsert_table, query_db
+# from scrapper.rating_system import calculate_rating
 from loguru import logger
+import gc
+
+gc.set_threshold(700, 10, 5)
+
 # Load environment variables
 load_dotenv()
-client = openai.OpenAI(
-    base_url="https://api.groq.com/openai/v1",
-    api_key=os.environ.get("GROQ_API_KEY")
-)
+# Initialize OpenAI client
+def get_openai_client():
+    """Get OpenAI client only when needed"""
+    import openai
 
-#Check
-#print("Using Groq API base:", openai.api_base)
-#print("Key prefix:", openai.api_key[:5])
+    return openai.OpenAI(
+        base_url="https://api.groq.com/openai/v1",
+        api_key=os.environ.get("GROQ_API_KEY"),
+    )
+
+
+
+
+# discord hook for basic info logging
+
+def discord_hook(message):
+    """Send a message to Discord webhook"""
+    import requests
+    webhook_url = os.getenv("DISCORD_WEBHOOK_URL")
+    if webhook_url:
+        try:
+            response = requests.post(webhook_url, json={"content": message})
+            response.raise_for_status()
+        except requests.RequestException as e:
+            logger.error(f"Failed to send Discord message: {e}")
+    else:
+        logger.warning("Discord webhook URL not set, skipping message sending.")
+
 
 # logger setup
 logger.add(
@@ -133,6 +157,7 @@ def analyze_emotions_with_sentiment(comments_text, sentiment_stats):
 
     try:
         logger.info(f"Sending request to analyze emotions with sentiment - comment length: {len(comments_text)}")
+        client = get_openai_client()
         response = client.chat.completions.create(
             model="llama3-70b-8192",
             messages=[
@@ -236,6 +261,7 @@ def generate_cohesive_summary(comments_df, keywords, sentiment_stats, emotions):
 
     try:
         logger.info("Sending summary generation request")
+        client = get_openai_client()
         response = client.chat.completions.create(
             model="llama3-70b-8192",
             messages=[
@@ -263,9 +289,24 @@ def generate_cohesive_summary(comments_df, keywords, sentiment_stats, emotions):
 @app.route('/', methods=['GET', 'POST'])
 def index():
     if request.method == 'POST':
+        import pandas as pd
+        import praw
+        from scrapper.keyword_extract import extract_keywords_with_sentiment
+        from scrapper.sentiment_analysis import SentimentAnalyzer
+        from scrapper.ls_psql import upsert_table, query_db
+        from scrapper.rating_system import calculate_rating
+        import scrapper.comment_fetcher as cf
+        from scrapper.ls_psql import connect_to_db
+
         logger.info("Received POST request")
         search_query = request.form.get("search_query", "").strip()
         logger.info(f"Search query: {search_query}")
+
+
+        # log info to Discord
+        discord_hook(f"Search query received: {search_query}")
+
+
 
         if len(search_query) <= 8:
             flash('Please enter a more descriptive query.', 'error')
@@ -411,6 +452,35 @@ def index():
                 conn.close()
 
     return render_template('index.html')
+
+@app.after_request
+def cleanup_after_request(response):
+    """Force garbage collection after each request"""
+    gc.collect()
+    return response
+# ------------------- Additional Routes -------------------
+@app.route("/memory-status", methods=["GET"])
+def memory_status():
+    """Get detailed memory usage statistics"""
+    import psutil
+    import gc
+
+    process = psutil.Process()
+    memory_info = process.memory_info()
+
+    # Get GC statistics
+    gc_counts = gc.get_count()
+
+    return {
+        "rss": f"{memory_info.rss / (1024 * 1024):.2f} MB",
+        "vms": f"{memory_info.vms / (1024 * 1024):.2f} MB",
+        "shared": f"{getattr(memory_info, 'shared', 0) / (1024 * 1024):.2f} MB",
+        "text": f"{getattr(memory_info, 'text', 0) / (1024 * 1024):.2f} MB",
+        "data": f"{getattr(memory_info, 'data', 0) / (1024 * 1024):.2f} MB",
+        "percent": f"{process.memory_percent():.2f}%",
+        "gc_counts": gc_counts,
+        "objects_count": len(gc.get_objects()),
+    }
 
 # ------------------- Run Server -------------------
 if __name__ == '__main__':
