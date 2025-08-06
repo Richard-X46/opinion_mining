@@ -39,6 +39,15 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      - name: Copy docker-compose.yml to Lightsail
+        uses: appleboy/scp-action@master
+        with:
+          host: ${{ secrets.LIGHTSAIL_HOST }}
+          username: ${{ secrets.LIGHTSAIL_USERNAME }}
+          key: ${{ secrets.LIGHTSAIL_SSH_KEY }}
+          source: docker-compose.yml
+          target: $HOME/
+
       - name: SSH into AWS Lightsail and Deploy with Docker Compose
         uses: appleboy/ssh-action@master
         with:
@@ -47,6 +56,7 @@ jobs:
           key: ${{ secrets.LIGHTSAIL_SSH_KEY }}
           script: |
             set -e
+            cd $HOME
 
             echo "Logging in to Docker registry..."
             echo "${{ secrets.GHCR_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
@@ -65,4 +75,4 @@ jobs:
             docker builder prune -af
 
             echo "Deployment complete. Running containers:"
-            docker-compose ps
+            docker-
