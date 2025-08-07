@@ -2,7 +2,7 @@ version: '3.8'
 
 services:
   opinion-mining:
-    build: .
+    image: ghcr.io/lumicore-aidi-2005/opinion-mining:latest
     container_name: opinion-mining
     env_file:
       - .env
@@ -14,8 +14,6 @@ services:
     restart: unless-stopped
     ports:
       - "5001:5001"
-    volumes:
-      - .:/app
     healthcheck:
       test: ["CMD", "python", "-c", "import psutil; exit(0 if psutil.virtual_memory().percent < 90 else 1)"]
       interval: 1m

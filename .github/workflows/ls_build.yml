@@ -39,6 +39,9 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        
       - name: Copy docker-compose.yml to Lightsail
         uses: appleboy/scp-action@master
         with:
@@ -75,4 +78,4 @@ jobs:
             docker builder prune -af
 
             echo "Deployment complete. Running containers:"
-            docker-
+            docker ps
