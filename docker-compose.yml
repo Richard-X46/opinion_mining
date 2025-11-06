@@ -2,7 +2,7 @@ version: '3.8'
 
 services:
   opinion-mining:
-    image: ghcr.io/lumicore-aidi-2005/opinion-mining:latest
+    image: ghcr.io/Richard-X46/opinion_mining:latest
     container_name: opinion-mining
     env_file:
       - .env
