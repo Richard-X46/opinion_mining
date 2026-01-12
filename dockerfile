@@ -1,40 +1,24 @@
-# Use Python 3.11 slim as the base image
-FROM python:3.11-slim
+# Use a Python image with uv pre-installed
+FROM ghcr.io/astral-sh/uv:python3.11-bookworm-slim
 
 # Set working directory
 WORKDIR /app
 
+# Enable bytecode compilation
+ENV UV_COMPILE_BYTECODE=1
+
 # Copy dependency files first (for caching)
-COPY pyproject.toml ./
-COPY uv.lock* ./
+COPY pyproject.toml uv.lock ./
 
-# Install UV and dependencies
-RUN pip install --no-cache-dir uv
+# Install dependencies (system-wide, no venv needed in Docker)
+RUN uv sync --frozen --no-install-project --no-dev
 
-# Install dependencies from pyproject.toml
-RUN uv pip install --system -e .
-
-# Copy the rest of the application code
-COPY . .
-
-# Set environment variables
-ENV FLASK_ENV=production
-ENV PYTHONPATH=/app 
-ENV PYTHONUNBUFFERED=1
-
-# Python memory optimization
-ENV PYTHONMALLOC=malloc
-ENV MALLOC_TRIM_THRESHOLD_=65536
-
-# logging
-ENV LOG_LEVEL=INFO
-
-# Create a non-root user and switch to it
-RUN useradd -m appuser && chown -R appuser:appuser /app
-USER appuser
+# Copy source code
+COPY src/ src/
 
 # Expose port
 EXPOSE 5001
 
-# Add the -Xdev flag to enable garbage collection debugging
-CMD ["python", "-Xdev", "application/app.py"]
+# Run the application
+# We use the CLI command directly, which is best practice for Docker
+CMD ["uv", "run", "uvicorn", "src.app:app", "--host", "0.0.0.0", "--port", "5001"]

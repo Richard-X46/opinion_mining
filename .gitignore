@@ -181,3 +181,5 @@ cython_debug/
 .pypirc
 scrapper/test.py
 scrapper/test.py
+TODO.md
+legacy/
