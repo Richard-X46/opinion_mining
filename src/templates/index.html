@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Ask Reddit</title>
+    <script src="https://unpkg.com/htmx.org@1.9.10"></script>
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <!-- Font links ... -->
+    <style>
+.dot {
+  position: absolute;
+  width: 4px;
+  height: 4px;
+  background: #363636;
+  border-radius: 50%;   /* <-- Fix here */
+  opacity: 0.9;
+  pointer-events: none;
+}
+    </style>
+    <style>
+  .htmx-request {
+    opacity: 1 !important;
+  }
+  .htmx-indicator {
+    opacity: 0;
+    transition: opacity 200ms ease-out;
+  }
+</style>
+</head>
+<body class="bg-black min-h-screen flex flex-col items-center justify-center">
+  <div id="dots"></div>
+  <div class="flex flex-col items-center w-full justify-center">
+    <pre class="text-white font-mono text-xs mb-22 text-center leading-tight"
+         style="font-family: 'JetBrains Mono', 'Menlo', 'Fira Mono', 'Consolas', 'Courier New', monospace;">
+
+  /$$$$$$            /$$                                       /$$       /$$ /$$   /$$    
+ /$$__  $$          | $$                                      | $$      | $$|__/  | $$    
+| $$  \ $$  /$$$$$$$| $$   /$$        /$$$$$$   /$$$$$$   /$$$$$$$  /$$$$$$$ /$$ /$$$$$$  
+| $$$$$$$$ /$$_____/| $$  /$$/       /$$__  $$ /$$__  $$ /$$__  $$ /$$__  $$| $$|_  $$_/  
+| $$__  $$|  $$$$$$ | $$$$$$/       | $$  \__/| $$$$$$$$| $$  | $$| $$  | $$| $$  | $$    
+| $$  | $$ \____  $$| $$_  $$       | $$      | $$_____/| $$  | $$| $$  | $$| $$  | $$ /$$
+| $$  | $$ /$$$$$$$/| $$ \  $$      | $$      |  $$$$$$$|  $$$$$$$|  $$$$$$$| $$  |  $$$$/
+|__/  |__/|_______/ |__/  \__/      |__/       \_______/ \_______/ \_______/|__/   \___/  
+         
+
+
+
+        </pre>
+
+<form hx-post="/analyze" hx-target="#result-area" hx-swap="innerHTML" hx-indicator="#loading"
+      class="w-full max-w-xl relative">
+  <div class="relative w-full">
+    <input type="text" name="query" placeholder="Type your query and press Enter…" required
+      class="w-full bg-black border border-gray-700 rounded-full px-6 py-3 pr-12 focus:outline-none focus:border-gray-400 text-lg text-white shadow placeholder-gray-400">
+  </div>
+</form>
+
+<!-- Loading Indicator -->
+<div id="loading" class="htmx-indicator text-center mt-8">
+    <div class="inline-block animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-gray-500"></div>
+    <p class="text-gray-400 mt-2 text-sm font-mono animate-pulse">Searching Reddit...</p>
+</div>
+
+
+
+
+<div id="result-area" class="w-full w-11/12 md:max-w-4xl mt-8"></div>
+  </div>
+    <script>
+      const dots = document.getElementById('dots');
+      const width = window.innerWidth;
+      const height = window.innerHeight;
+      const numDots = 22;
+      const minRadius = 20;
+      const maxRadius = 80;
+
+      // Store each dot's base position and animation parameters
+      const dotParams = [];
+
+      for (let i = 0; i < numDots; i++) {
+        const dot = document.createElement('div');
+        dot.className = 'dot';
+        // Random base position across the page
+        const baseX = Math.random() * width;
+        const baseY = Math.random() * height;
+        // Random orbit radius and speed
+        const orbitRadius = minRadius + Math.random() * (maxRadius - minRadius);
+        const orbitSpeed = 0.1 + Math.random() * 0.15; // Slower movement
+        const orbitAngle = Math.random() * 2 * Math.PI;
+        dotParams.push({ baseX, baseY, orbitRadius, orbitSpeed, orbitAngle });
+        dot.style.left = `${baseX}px`;
+        dot.style.top = `${baseY}px`;
+        dots.appendChild(dot);
+      }
+
+      // Animate dots in local orbits around their base positions
+      setInterval(() => {
+        const time = Date.now() / 1000;
+        document.querySelectorAll('.dot').forEach((dot, i) => {
+          const { baseX, baseY, orbitRadius, orbitSpeed, orbitAngle } = dotParams[i];
+          const angle = orbitAngle + time * orbitSpeed;
+          dot.style.left = `${baseX + orbitRadius * Math.cos(angle)}px`;
+          dot.style.top = `${baseY + orbitRadius * Math.sin(angle)}px`;
+        });
+      }, 30);
+
+
+</script>
+</body>
+</html>
