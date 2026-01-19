@@ -10,8 +10,7 @@ Scores comment relevance
 ### Status
 Experimental project for learning and testing LLMs.
 
-🔗 Demo: [Ask Reddit](http://3.97.33.170)
-
+🔗 Demo: [Ask Reddit](https://richard-x46.me/opinion-mining)
 ## License
 
 [MIT License](LICENSE)
