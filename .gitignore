@@ -1,3 +1,9 @@
+# docs folder
+docs/
+
+#copilot agents
+*.agent.md
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
@@ -9,10 +15,10 @@ __pycache__/
 
 # notes md
 notes.md
-*test.py
 
 # DS_Store files
-*.DS_Store
+.DS_Store
+**/.DS_Store
 
 # Distribution / packaging
 .Python
@@ -46,7 +52,6 @@ venv.bak/
 # Python
 __pycache__/
 *.pyc
-__init__.py
 
 # Environments
 *.env
@@ -183,3 +188,13 @@ scrapper/test.py
 scrapper/test.py
 TODO.md
 legacy/
+
+# ChromaDB persistent storage (local runtime data)
+chroma_db/
+
+# Local editor / scratch artifacts
+.vscode/
+backups/
+*.wav
+*.onnx
+*.onnx.json

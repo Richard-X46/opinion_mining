@@ -25,13 +25,12 @@ if __name__ == "__main__":
     test_query = "google antigravity vs vscode 2025"
 
     test_comments = ["google antigravity is the best", 
-                    "vscode is the best",
-                     "google antigravity is the best",
                      "aws has better models",
                      "openai does a better job",
-                     "cursor is better ide",
-
-                     "vscode is the best"]
+                     "cursor is better ide"
+                     "langchain is a great library for building LLM applications",
+                     "transformers are a powerful architecture for NLP tasks",
+                     "bert is a popular transformer model for text classification",]
     comments = analyzer.rank_comments(test_query, test_comments)
     for comment, score in comments:
         print(comment, score,"\n")

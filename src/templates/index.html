@@ -1,109 +1,592 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-    <title>Ask Reddit</title>
-    <script src="https://unpkg.com/htmx.org@1.9.10"></script>
-    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
-    <!-- Font links ... -->
-    <style>
-.dot {
-  position: absolute;
-  width: 4px;
-  height: 4px;
-  background: #363636;
-  border-radius: 50%;   /* <-- Fix here */
-  opacity: 0.9;
-  pointer-events: none;
-}
-    </style>
-    <style>
-  .htmx-request {
-    opacity: 1 !important;
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Ask Reddit</title>
+<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700;800&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#141415; --ink:#EDECE8; --muted:#9C9890; --line:#2B2B2E;
+    --card:#1D1D20; --accent:#E93B01; --accent-bright:#F43E01;
+    --g1:#E354C0; --g2:#908BD0; --g3:#7DB7D4;
+    --grain:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='140' height='140' filter='url(%23n)' opacity='0.08'/%3E%3C/svg%3E");
   }
-  .htmx-indicator {
-    opacity: 0;
-    transition: opacity 200ms ease-out;
+  :root[data-theme="light"]{
+    --bg:#E2E1D7; --ink:#2F2B29; --muted:#7A746F; --line:#E0DDD2; --card:#FCFBF7;
+    /* deepened stops: thin strokes need ~4:1 on cream; the vivid
+       dark-mode stops wash out here, esp. the sky blue */
+    --g1:#C2189A; --g2:#5A53B5; --g3:#2E7AA8;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{
+    margin:0; background:linear-gradient(180deg,#1A1A1E 0%,#101013 75%); color:var(--ink);
+    font:14px/1.65 "JetBrains Mono",ui-monospace,Menlo,Consolas,monospace;
+    min-height:100dvh; display:flex; flex-direction:column;
+    -webkit-font-smoothing:antialiased;
+  }
+  :root[data-theme="light"] body{background:var(--bg)}
+  /* whisper of dithered grain — the page's only other texture */
+  body::after{
+    content:""; position:fixed; inset:0; z-index:0; pointer-events:none;
+    background:var(--grain);
+  }
+  :root[data-theme="light"] body::after{background:none}
+
+  .page{
+    width:100%; max-width:780px; margin:0 auto; padding:28px 20px 32px;
+    flex:1; display:flex; flex-direction:column; justify-content:center;
+    position:relative; z-index:1;
+    min-height:100dvh;
+  }
+  body.chat-active .page{justify-content:flex-start}
+
+  /* ── hero / ascii ────────────────────────────── */
+  .hero{padding:32px 0 8px; text-align:center; transition:padding .3s ease;
+    display:flex; justify-content:center;}
+  .ascii-scroll{overflow-x:auto; scrollbar-width:none; padding-bottom:6px;
+    display:flex; justify-content:center;}
+  .ascii-scroll::-webkit-scrollbar{display:none}
+  pre.ascii{
+    margin:0; display:inline-block; text-align:left; white-space:pre;
+    font:700 clamp(5px,1.5vw,9.5px)/1.25 "JetBrains Mono",monospace;
+    letter-spacing:0;
+    /* TypeSafe gradient, confined to the glyphs + dithered grain inside the text */
+    background-image:
+      var(--grain),
+      linear-gradient(100deg,var(--g1) 0%,var(--g2) 52%,var(--g3) 100%);
+    background-size:auto, 200% 100%;
+    background-position:0 0, 30% 0;
+    -webkit-background-clip:text; background-clip:text; color:transparent;
+    transition:font-size .3s ease;
+  }
+  /* legibility fallback if background-clip:text is unsupported */
+  @supports not ((-webkit-background-clip:text) or (background-clip:text)){
+    pre.ascii{color:var(--g2)}
+  }
+  /* light mode: real extra-bold glyphs + no grain, so thin strokes stay crisp */
+  :root[data-theme="light"] pre.ascii{
+    font-weight:800;
+    background-image:linear-gradient(100deg,var(--g1) 0%,var(--g2) 52%,var(--g3) 100%);
+  }
+
+  /* ── messages ────────────────────────────────── */
+  #messages{
+    flex:1; display:none; flex-direction:column; gap:16px;
+    padding:26px 2px 10px; overflow-y:auto; scrollbar-width:thin;
+    scrollbar-color:#CFCAB9 transparent; min-height:0;
+  }
+  body.chat-active #messages{display:flex}
+  #messages::-webkit-scrollbar{width:4px}
+  #messages::-webkit-scrollbar-thumb{background:#CFCAB9; border-radius:2px}
+
+  .msg-user{display:flex; justify-content:flex-end}
+  .msg-user .bubble{
+    background:var(--ink); color:var(--bg);
+    padding:10px 16px; border-radius:18px 18px 4px 18px;
+    max-width:80%; font-size:13px; line-height:1.6;
+    overflow-wrap:anywhere;
+  }
+  .msg-bot{display:flex; gap:10px; align-items:flex-start}
+  .msg-bot.is-pending{display:none}
+  .bot-avatar{
+    width:28px; height:28px; border-radius:50%; flex:none; margin-top:2px;
+    border:1px solid var(--line); background:var(--card);
+    display:flex; align-items:center; justify-content:center; color:var(--accent);
+  }
+  .bot-avatar svg{width:15px; height:15px}
+  .msg-bot .bubble{
+    background:var(--card); border:1px solid var(--line); border-radius:4px 16px 16px 16px;
+    padding:14px 18px; flex:1; min-width:0; font-size:13px; line-height:1.75;
+    overflow-x:auto; overflow-wrap:anywhere;
+    box-shadow:0 1px 2px rgba(47,43,41,.05);
+  }
+  .msg-bot .bubble p{margin:0 0 10px; max-width:68ch}
+  .msg-bot .bubble p:last-child{margin-bottom:0}
+  .msg-bot .bubble ul,.msg-bot .bubble ol{margin:8px 0; padding-left:20px}
+  .msg-bot .bubble li{margin:4px 0}
+  .msg-bot .bubble code{background:rgba(237,236,232,.09); padding:2px 6px; border-radius:4px; font-size:12px}
+  :root[data-theme="light"] .msg-bot .bubble code{background:rgba(47,43,41,.07)}
+  .msg-bot .bubble table{display:block; max-width:100%; overflow-x:auto; border-collapse:collapse; font-size:12px; margin:8px 0}
+  .msg-bot .bubble th,.msg-bot .bubble td{border:1px solid var(--line); padding:4px 8px; text-align:left}
+  .msg-bot .bubble img{max-width:100%}
+  .msg-bot .bubble a{color:var(--accent); text-underline-offset:3px}
+
+  .sources-wrap{margin-top:12px}
+  .sources-toggle{
+    background:none; border:1px solid var(--line); border-radius:999px;
+    color:var(--muted); font:inherit; font-size:11px; padding:4px 12px; cursor:pointer;
+  }
+  .sources-toggle:hover{color:var(--ink); border-color:var(--accent)}
+  .sources-toggle::after{content:" ▾"}
+  .sources-toggle.open::after{content:" ▴"}
+  .sources{display:flex; flex-wrap:wrap; gap:6px; margin-top:8px}
+  .sources-collapsed{display:none}
+  .source-pill{
+    font-size:11px; color:var(--muted); border:1px solid var(--line);
+    border-radius:999px; padding:2px 10px; text-decoration:none; white-space:nowrap;
+  }
+  a.source-pill::before{content:"↗ "; color:var(--muted)}
+  a.source-pill:hover{color:var(--ink); border-color:var(--accent)}
+  .source-pill.lead{border-color:var(--g2); color:var(--g2)}
+
+  /* per-answer token metrics */
+  .metrics{margin-top:10px; font-size:11px; color:var(--muted)}
+  .metrics b{color:var(--ink); font-weight:500}
+
+  /* tri-color typing dots: pink → periwinkle → blue */
+  #typing-indicator{display:none; align-items:center; gap:10px; padding:0 2px 8px}
+  .typing-dots{display:flex; gap:6px; align-items:center; background:var(--card);
+    border:1px solid var(--line); border-radius:4px 16px 16px 16px; padding:12px 16px}
+  .typing-dots i{width:7px; height:7px; border-radius:50%; animation:blip 1.1s infinite}
+  .typing-dots i:nth-child(1){background:var(--g1)}
+  .typing-dots i:nth-child(2){background:var(--g2); animation-delay:.18s}
+  .typing-dots i:nth-child(3){background:var(--g3); animation-delay:.36s}
+  @keyframes blip{0%,100%{opacity:.25; transform:translateY(0)}40%{opacity:1; transform:translateY(-3px)}}
+  @media (prefers-reduced-motion:reduce){.typing-dots i{animation:none}}
+  .typing-text{font-size:12px; color:var(--muted)}
+
+  /* ── input ───────────────────────────────────── */
+  #input-bar{padding:14px 0 6px}
+  #chat-form{display:flex; justify-content:center}
+  .input-wrap{position:relative; width:100%}
+  #query-input{
+    display:block; width:100%; font:inherit; font-size:13px;
+    background:var(--card); color:var(--ink);
+    border:1px solid var(--line); border-radius:999px;
+    padding:14px 54px 14px 22px; outline:none;
+    resize:none; overflow-y:auto; max-height:120px; line-height:1.5;
+    box-shadow:0 1px 2px rgba(47,43,41,.05);
+    transition:border-color .15s, box-shadow .15s;
+  }
+  #query-input::placeholder{color:#A6A094}
+  #query-input:focus{border-color:var(--muted); box-shadow:none}
+  #send-btn{
+    position:absolute; right:6px; top:50%; transform:translateY(-50%);
+    width:37px; height:37px; border-radius:50%; cursor:pointer;
+    background:transparent; border:1px solid var(--line); color:var(--accent-bright);
+    font-size:17px; line-height:1; display:flex; align-items:center; justify-content:center;
+    transition:background .15s, border-color .15s, color .15s, transform .1s;
+  }
+  #send-btn:hover{background:var(--accent); border-color:var(--accent); color:#fff}
+  #send-btn:active{transform:translateY(-50%) scale(.94)}
+  /* stop state: filled square, click again to halt the run */
+  #send-btn.is-stop{background:var(--accent); border-color:var(--accent); color:#fff; font-size:12px}
+
+  #welcome{text-align:center; padding:12px 0 2px; font-size:12.5px}
+  #welcome .hint{display:block; margin-top:5px; font-size:11.5px; color:var(--muted)}
+  #welcome a{color:var(--accent-bright); text-decoration:none}
+  #welcome a:hover{text-decoration:underline}
+  #welcome .jev{color:var(--g1)}
+
+  /* chat state: masthead collapses, no layout jump */
+  body.chat-active .hero{display:none}
+  body.chat-active #welcome{display:none}
+  body.chat-active #input-bar{padding-bottom:14px}
+
+  .foot{text-align:center; padding:10px 0 4px}
+  .foot button{background:none; border:none; color:var(--muted); font:inherit;
+    font-size:11px; letter-spacing:.08em; cursor:pointer; text-decoration:underline;
+    text-underline-offset:3px}
+  .foot button:hover{color:var(--accent)}
+
+  /* about modal */
+  #about-modal{display:none; position:fixed; inset:0; z-index:100;
+    background:rgba(47,43,41,.5); align-items:center; justify-content:center; padding:20px}
+  .about-card{
+    background:var(--card); border:1px solid var(--line); border-radius:16px;
+    padding:28px 30px; max-width:470px; width:100%; position:relative;
+    font-size:13px; line-height:1.8; box-shadow:0 24px 60px rgba(47,43,41,.2);
+  }
+  .about-card .kicker{color:var(--accent); font-weight:700; margin-bottom:10px}
+  .about-card .stack{margin-top:14px; font-size:11px; color:var(--muted)}
+  .about-card .limits-title{margin-top:14px; font-size:11px; letter-spacing:.12em; text-transform:uppercase; color:var(--muted)}
+  .about-card .limits{margin:6px 0 0; font-size:12px; line-height:1.7}
+  .about-card .close{position:absolute; top:10px; right:14px; background:none; border:none;
+    color:var(--muted); font-size:18px; cursor:pointer}
+  .about-card .close:hover{color:var(--accent)}
+  /* a whisper of gradient inside the modal title */
+  .about-card .kicker{
+    background:linear-gradient(90deg,var(--g1),var(--g2),var(--g3));
+    -webkit-background-clip:text; background-clip:text; color:transparent;
+  }
+
+  /* theme toggle — icon, pinned top-right */
+  #theme-toggle{
+    position:fixed; top:14px; right:14px; z-index:70;
+    width:32px; height:32px; border-radius:50%;
+    background:var(--card); border:1px solid var(--line); color:var(--muted);
+    display:flex; align-items:center; justify-content:center; cursor:pointer; padding:0;
+  }
+  #theme-toggle:hover{color:var(--accent); border-color:var(--accent)}
+  #theme-toggle:focus-visible{outline:none; border-color:var(--accent)}
+  #theme-toggle svg{width:15px; height:15px}
+
+  /* home — back to landing, visible only once a chat is open */
+  #home-btn{
+    position:fixed; top:14px; left:14px; z-index:70;
+    width:32px; height:32px; border-radius:50%;
+    background:var(--card); border:1px solid var(--line); color:var(--muted);
+    display:none; align-items:center; justify-content:center; cursor:pointer; padding:0;
+  }
+  body.chat-active #home-btn{display:flex}
+  #home-btn:hover{color:var(--accent); border-color:var(--accent)}
+  #home-btn:focus-visible{outline:none; border-color:var(--accent)}
+  #home-btn svg{width:15px; height:15px}
+
+  @media (max-width:640px){
+    .page{padding:20px 14px 24px}
+    .hero{padding:28px 0 6px}
+    pre.ascii{font-size:clamp(3px,1.45vw,6px)}
+    #query-input{padding:12px 48px 12px 18px; font-size:16px; max-height:110px}
+    .msg-user .bubble{max-width:88%; font-size:14px}
+    .msg-bot .bubble{font-size:14px; line-height:1.7}
+    #welcome{font-size:13px}
+    #welcome .hint{font-size:12px}
+    .typing-text{font-size:13px}
   }
 </style>
 </head>
-<body class="bg-black min-h-screen flex flex-col items-center justify-center">
-  <div id="dots"></div>
-  <div class="flex flex-col items-center w-full justify-center">
-    <pre class="text-white font-mono text-xs mb-22 text-center leading-tight"
-         style="font-family: 'JetBrains Mono', 'Menlo', 'Fira Mono', 'Consolas', 'Courier New', monospace;">
+<body>
+<button id="theme-toggle" type="button" aria-label="Toggle light and dark mode"></button>
+<button id="home-btn" type="button" aria-label="Back to home">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10.5 12 3l9 7.5"></path><path d="M5 9.5V21h14V9.5"></path></svg>
+</button>
+<div class="page">
 
-  /$$$$$$            /$$                                       /$$       /$$ /$$   /$$    
- /$$__  $$          | $$                                      | $$      | $$|__/  | $$    
-| $$  \ $$  /$$$$$$$| $$   /$$        /$$$$$$   /$$$$$$   /$$$$$$$  /$$$$$$$ /$$ /$$$$$$  
-| $$$$$$$$ /$$_____/| $$  /$$/       /$$__  $$ /$$__  $$ /$$__  $$ /$$__  $$| $$|_  $$_/  
-| $$__  $$|  $$$$$$ | $$$$$$/       | $$  \__/| $$$$$$$$| $$  | $$| $$  | $$| $$  | $$    
-| $$  | $$ \____  $$| $$_  $$       | $$      | $$_____/| $$  | $$| $$  | $$| $$  | $$ /$$
-| $$  | $$ /$$$$$$$/| $$ \  $$      | $$      |  $$$$$$$|  $$$$$$$|  $$$$$$$| $$  |  $$$$/
-|__/  |__/|_______/ |__/  \__/      |__/       \_______/ \_______/ \_______/|__/   \___/  
-         
+  <main class="hero" id="hero">
+    <div class="ascii-scroll">
+<pre class="ascii" id="art">  /RRRRRR            /RR                                       /RR       /RR /RR   /RR
+ /RR__  RR          | RR                                      | RR      | RR|__/  | RR
+| RR  \ RR  /RRRRRRR| RR   /RR        /RRRRRR   /RRRRRR   /RRRRRRR  /RRRRRRR /RR /RRRRRR
+| RRRRRRRR /RR_____/| RR  /RR/       /RR__  RR /RR__  RR /RR__  RR /RR__  RR| RR|_  RR_/
+| RR__  RR|  RRRRRR | RRRRRR/       | RR  \__/| RRRRRRRR| RR  | RR| RR  | RR| RR  | RR
+| RR  | RR \____  RR| RR_  RR       | RR      | RR_____/| RR  | RR| RR  | RR| RR  | RR /RR
+| RR  | RR /RRRRRRR/| RR \  RR      | RR      |  RRRRRRR|  RRRRRR|  RRRRRR| RR  |  RRRR/
+|__/  |__/|_______/ |__/  \__/      |__/       \_______/ \_______/ \_______/|__/   \___/  </pre>
+    </div>
+  </main>
 
+  <div id="messages" aria-live="polite"></div>
 
-
-        </pre>
-
-<form hx-post="/analyze" hx-target="#result-area" hx-swap="innerHTML" hx-indicator="#loading"
-      class="w-full max-w-xl relative">
-  <div class="relative w-full">
-    <input type="text" name="query" placeholder="Type your query and press Enter…" required
-      class="w-full bg-black border border-gray-700 rounded-full px-6 py-3 pr-12 focus:outline-none focus:border-gray-400 text-lg text-white shadow placeholder-gray-400">
+  <div id="typing-indicator">
+    <div class="typing-dots" aria-hidden="true"><i></i><i></i><i></i></div>
+    <div class="typing-text" id="typing-text">Searching Reddit…</div>
   </div>
-</form>
 
-<!-- Loading Indicator -->
-<div id="loading" class="htmx-indicator text-center mt-8">
-    <div class="inline-block animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-gray-500"></div>
-    <p class="text-gray-400 mt-2 text-sm font-mono animate-pulse">Searching Reddit...</p>
+  <div id="input-bar">
+    <form id="chat-form" autocomplete="off">
+      <div class="input-wrap">
+        <textarea name="query" id="query-input" rows="1"
+          placeholder="Ask something you would normally search for on reddit"
+          autocomplete="off" required aria-label="Your question"></textarea>
+        <button type="submit" id="send-btn" aria-label="Send">&#8593;</button>
+      </div>
+      <input type="hidden" name="session_id" id="session-id-input" value="">
+    </form>
+  </div>
+
+  <div id="welcome">
+    <span>Context sourced from reddit for inference</span>
+    <span class="hint">powered by <a href="https://groq.com" target="_blank" rel="noopener">groq</a> & <a class="jev" href="https://typesafe.ai/" target="_blank" rel="noopener">jev</a></span>
+  </div>
+
+  <div class="foot">
+    <button type="button" onclick="document.getElementById('about-modal').style.display='flex'">about this prototype — data · stack · limits</button>
+  </div>
 </div>
 
-
-
-
-<div id="result-area" class="w-full w-11/12 md:max-w-4xl mt-8"></div>
+<div id="about-modal" role="dialog" aria-modal="true" aria-label="About">
+  <div class="about-card">
+    <button class="close" type="button" onclick="document.getElementById('about-modal').style.display='none'" aria-label="Close">✕</button>
+    <div class="kicker">Ask Reddit</div>
+    <p>A conversational RAG chatbot that mines Reddit for real opinions.</p>
+    <p>Ask anything — it searches Reddit in real time, embeds and indexes comments
+    via ChromaDB, and generates grounded answers using Groq LLMs.</p>
+    <div class="limits-title">Limits</div>
+    <p class="limits">Answers reflect only indexed Reddit threads — opinions, not facts — so coverage can be thin, biased, or stale, and safety filters or slow fetches may get in the way.</p>
+    <p class="stack">Built with FastAPI · LangGraph · LangChain · Groq · TypeSafe Jev · ChromaDB · PRAW</p>
   </div>
-    <script>
-      const dots = document.getElementById('dots');
-      const width = window.innerWidth;
-      const height = window.innerHeight;
-      const numDots = 22;
-      const minRadius = 20;
-      const maxRadius = 80;
+</div>
 
-      // Store each dot's base position and animation parameters
-      const dotParams = [];
+<script>
+  // Theme (persisted). Dark grey is the default. Icon shows what
+  // you'll switch to: sun in dark mode, moon in light mode.
+  (function () {
+    var root = document.documentElement, btn = document.getElementById('theme-toggle');
+    var SUN = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4"></circle><line x1="12" y1="2" x2="12" y2="5"></line><line x1="12" y1="19" x2="12" y2="22"></line><line x1="2" y1="12" x2="5" y2="12"></line><line x1="19" y1="12" x2="22" y2="12"></line><line x1="4.9" y1="4.9" x2="7" y2="7"></line><line x1="17" y1="17" x2="19.1" y2="19.1"></line><line x1="4.9" y1="19.1" x2="7" y2="17"></line><line x1="17" y1="7" x2="19.1" y2="4.9"></line></svg>';
+    var MOON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"></path></svg>';
+    try {
+      var s = localStorage.getItem('theme');
+      root.dataset.theme = s || 'dark';
+    } catch (e) { root.dataset.theme = 'dark'; }
+    function render(){
+      var dark = root.dataset.theme === 'dark';
+      btn.innerHTML = dark ? SUN : MOON;
+      btn.setAttribute('aria-label', dark ? 'Switch to light mode' : 'Switch to dark mode');
+    }
+    render();
+    btn.addEventListener('click', function () {
+      root.dataset.theme = root.dataset.theme === 'dark' ? 'light' : 'dark';
+      try { localStorage.setItem('theme', root.dataset.theme); } catch (e) {}
+      render();
+    });
+  })();
 
-      for (let i = 0; i < numDots; i++) {
-        const dot = document.createElement('div');
-        dot.className = 'dot';
-        // Random base position across the page
-        const baseX = Math.random() * width;
-        const baseY = Math.random() * height;
-        // Random orbit radius and speed
-        const orbitRadius = minRadius + Math.random() * (maxRadius - minRadius);
-        const orbitSpeed = 0.1 + Math.random() * 0.15; // Slower movement
-        const orbitAngle = Math.random() * 2 * Math.PI;
-        dotParams.push({ baseX, baseY, orbitRadius, orbitSpeed, orbitAngle });
-        dot.style.left = `${baseX}px`;
-        dot.style.top = `${baseY}px`;
-        dots.appendChild(dot);
+  // Gradient sheen on the ASCII follows the pointer (cheap, GPU-free).
+  (function () {
+    var art = document.getElementById('art');
+    addEventListener('mousemove', function (e) {
+      art.style.backgroundPosition = '0 0,' + (e.clientX / innerWidth * 100).toFixed(1) + '% 0';
+    }, { passive: true });
+  })();
+
+  var form = document.getElementById('chat-form');
+  var input = document.getElementById('query-input');
+  var messages = document.getElementById('messages');
+  var typingIndicator = document.getElementById('typing-indicator');
+  var typingText = document.getElementById('typing-text');
+  var welcome = document.getElementById('welcome');
+  var sessionId = null, isStreaming = false;
+  var sendBtn = document.getElementById('send-btn');
+  var streamController = null;
+
+  // Shorter placeholder on narrow screens so it never clips mid-word.
+  var DEFAULT_PLACEHOLDER = 'Ask something you would normally search for on reddit';
+  if (matchMedia('(max-width:640px)').matches) {
+    DEFAULT_PLACEHOLDER = 'Ask anything…';
+    input.placeholder = DEFAULT_PLACEHOLDER;
+  }
+
+  // Auto-growing composer: long questions wrap instead of scrolling sideways.
+  function autogrow() {
+    input.style.height = 'auto';
+    input.style.height = Math.min(input.scrollHeight, 120) + 'px';
+  }
+  input.addEventListener('input', autogrow);
+
+  function setSendMode(mode) {
+    if (mode === 'stop') {
+      sendBtn.classList.add('is-stop');
+      sendBtn.innerHTML = '&#9632;';
+      sendBtn.setAttribute('aria-label', 'Stop');
+      sendBtn.formNoValidate = true;
+    } else {
+      sendBtn.classList.remove('is-stop');
+      sendBtn.innerHTML = '&#8593;';
+      sendBtn.setAttribute('aria-label', 'Send');
+      sendBtn.formNoValidate = false;
+    }
+  }
+
+  async function stopStream() {
+    // Tell the server to halt at the next node/token boundary, then cut
+    // the stream locally. Any partial server result is discarded.
+    try {
+      await fetch('/stop', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ session_id: sessionId })
+      });
+    } catch (e) { /* stopping must work even if this fails */ }
+    if (streamController) streamController.abort();
+  }
+
+  async function submitQuery() {
+    if (isStreaming) { stopStream(); return; }
+    var query = input.value.trim();
+    if (!query) return;
+    isStreaming = true;
+    setSendMode('stop');
+    if (!sessionId) {
+      sessionId = (window.crypto && crypto.randomUUID) ? crypto.randomUUID() : 's-' + Date.now();
+    }
+    input.value = '';
+    input.placeholder = '';
+    input.style.height = 'auto';
+
+    document.body.classList.add('chat-active');
+    if (welcome) welcome.style.display = 'none';
+
+    var userMsg = document.createElement('div');
+    userMsg.className = 'msg-user';
+    var ub = document.createElement('div');
+    ub.className = 'bubble'; ub.textContent = query;
+    userMsg.appendChild(ub);
+    messages.appendChild(userMsg);
+
+    var botMsg = document.createElement('div');
+    botMsg.className = 'msg-bot is-pending';
+    botMsg.innerHTML =
+      '<div class="bot-avatar" aria-hidden="true">' +
+      '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
+      '<path d="M21 15a2 2 0 0 1-2 2H7l-5 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>' +
+      '<line x1="9" y1="9" x2="15" y2="9"></line>' +
+      '<line x1="9" y1="12" x2="13" y2="12"></line></svg></div>' +
+      '<div class="bubble"><span class="response-text"></span></div>';
+    messages.appendChild(botMsg);
+    var responseText = botMsg.querySelector('.response-text');
+
+    var revealed = false;
+    function revealBot() {
+      if (!revealed) { revealed = true; botMsg.classList.remove('is-pending'); scrollToBottom(); }
+    }
+
+    typingText.textContent = 'Searching Reddit for opinions…';
+    typingIndicator.style.display = 'flex';
+    var slowTimer = setTimeout(function () {
+      if (isStreaming) typingText.textContent = 'Reading comments — Reddit can be slow, up to a minute…';
+    }, 8000);
+    function hideTyping() { clearTimeout(slowTimer); typingIndicator.style.display = 'none'; }
+    scrollToBottom();
+
+    var rawText = '';
+    try {
+      streamController = new AbortController();
+      var body = { query: query, session_id: sessionId };
+
+      var res = await fetch('/chat', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body), signal: streamController.signal
+      });
+      var reader = res.body.getReader();
+      var decoder = new TextDecoder();
+      var buffer = '', lastRender = 0;
+
+      function renderMarkdown() {
+        responseText.innerHTML = marked.parse(rawText);
+        lastRender = Date.now();
       }
 
-      // Animate dots in local orbits around their base positions
-      setInterval(() => {
-        const time = Date.now() / 1000;
-        document.querySelectorAll('.dot').forEach((dot, i) => {
-          const { baseX, baseY, orbitRadius, orbitSpeed, orbitAngle } = dotParams[i];
-          const angle = orbitAngle + time * orbitSpeed;
-          dot.style.left = `${baseX + orbitRadius * Math.cos(angle)}px`;
-          dot.style.top = `${baseY + orbitRadius * Math.sin(angle)}px`;
-        });
-      }, 30);
+      while (true) {
+        var step = await reader.read();
+        if (step.done) break;
+        buffer += decoder.decode(step.value, { stream: true });
+        var lines = buffer.split('\n');
+        buffer = lines.pop();
+        for (var li = 0; li < lines.length; li++) {
+          var line = lines[li];
+          if (line.indexOf('data: ') !== 0) continue;
+          var raw = line.slice(6).trim();
+          if (!raw) continue;
+          try {
+            var event = JSON.parse(raw);
+            if (event.type === 'status') typingText.textContent = event.message;
+            if (event.type === 'session') { sessionId = event.session_id; typingText.textContent = 'Writing answer…'; }
+            if (event.type === 'token') {
+              hideTyping(); rawText += event.token; revealBot();
+              if (Date.now() - lastRender > 120) renderMarkdown();
+              scrollToBottom();
+            }
+            if (event.type === 'blocked') {
+              revealBot(); responseText.textContent = 'Query blocked by safety filters.';
+              sessionId = event.session_id;
+            }
+            if (event.type === 'no_sources') {
+              revealBot(); sessionId = event.session_id;
+              rawText = event.message || 'No Reddit threads found for this query.';
+              responseText.textContent = rawText; scrollToBottom();
+            }
+            if (event.type === 'stopped') {
+              sessionId = event.session_id;
+              if (!rawText) botMsg.remove();
+              scrollToBottom();
+            }
+            if (event.type === 'done') {
+              revealBot(); sessionId = event.session_id; renderMarkdown();
+              if (event.sources && event.sources.length) {
+                var top = event.sources.slice(0, 5);
+                var wrap = document.createElement('div');
+                wrap.className = 'sources-wrap';
+                var btn = document.createElement('button');
+                btn.className = 'sources-toggle'; btn.type = 'button';
+                btn.textContent = 'Sources (' + top.length + ')';
+                var list = document.createElement('div');
+                list.className = 'sources sources-collapsed';
+                top.forEach(function (url, i) {
+                  var a = document.createElement('a');
+                  a.className = 'source-pill' + (i === 0 ? ' lead' : '');
+                  a.href = url; a.target = '_blank'; a.rel = 'noopener';
+                  a.textContent = 'Source ' + (i + 1); a.title = url;
+                  list.appendChild(a);
+                });
+                btn.onclick = function () {
+                  list.classList.toggle('sources-collapsed'); btn.classList.toggle('open');
+                };
+                wrap.appendChild(btn); wrap.appendChild(list);
+                botMsg.querySelector('.bubble').appendChild(wrap);
+              }
+              if (event.usage) {
+                var meta = document.createElement('div');
+                meta.className = 'metrics';
+                meta.innerHTML = 'groq <b>' + fmtTokens(event.usage.groq.in) + '</b> in · <b>' +
+                  fmtTokens(event.usage.groq.out) + '</b> out &nbsp;—&nbsp; jev <b>' +
+                  fmtTokens(event.usage.jev.in) + '</b> in · ' + event.usage.jev.calls + ' calls';
+                botMsg.querySelector('.bubble').appendChild(meta);
+              }
+              scrollToBottom();
+            }
+          } catch (e) { console.error('Failed to parse event:', raw, e); }
+        }
+      }
+    } catch (err) {
+      if (err && err.name === 'AbortError') {
+        if (!rawText) botMsg.remove();
+      } else {
+        revealBot();
+        responseText.textContent = 'Something went wrong. Please try again.';
+        console.error(err);
+      }
+    }
+    hideTyping();
+    streamController = null;
+    isStreaming = false;
+    setSendMode('send');
+    scrollToBottom();
+  }
 
+  form.addEventListener('submit', function (e) { e.preventDefault(); submitQuery(); });
+  input.addEventListener('keydown', function (e) {
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); submitQuery(); }
+  });
 
+  function scrollToBottom() {
+    messages.scrollTo({ top: messages.scrollHeight, behavior: 'smooth' });
+  }
+
+  function fmtTokens(n) {
+    n = n || 0;
+    return n >= 1000 ? (n / 1000).toFixed(1) + 'k' : String(n);
+  }
+
+  // Home: halt any live run, drop the transcript, back to landing.
+  // Fresh session id so the next question starts a clean server session.
+  document.getElementById('home-btn').addEventListener('click', function () {
+    if (isStreaming) stopStream();
+    streamController = null;
+    isStreaming = false;
+    setSendMode('send');
+    messages.innerHTML = '';
+    typingIndicator.style.display = 'none';
+    document.body.classList.remove('chat-active');
+    if (welcome) welcome.style.display = '';
+    input.value = '';
+    input.placeholder = DEFAULT_PLACEHOLDER;
+    input.style.height = 'auto';
+    sessionId = null;
+    window.scrollTo(0, 0);
+  });
+
+  var aboutModal = document.getElementById('about-modal');
+  aboutModal.addEventListener('click', function (e) {
+    if (e.target === this) this.style.display = 'none';
+  });
+  addEventListener('keydown', function (e) {
+    if (e.key === 'Escape') aboutModal.style.display = 'none';
+  });
 </script>
 </body>
 </html>
