@@ -435,6 +435,11 @@
 </div>
 
 <script>
+  // The app runs at "/" locally but Caddy mounts it at "/opinion-mining" in
+  // production. Derive the mount prefix from the page URL so API calls stay
+  // inside the app instead of hitting the domain root.
+  var API_BASE = window.location.pathname.replace(/\/+$/, '').replace(/\/index\.html$/, '');
+
   // Theme (persisted). Dark grey is the default. Icon shows what
   // you'll switch to: sun in dark mode, moon in light mode.
   (function () {
@@ -508,7 +513,7 @@
     // Tell the server to halt at the next node/token boundary, then cut
     // the stream locally. Any partial server result is discarded.
     try {
-      await fetch('/stop', {
+      await fetch(API_BASE + '/stop', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ session_id: sessionId })
       });
@@ -580,7 +585,7 @@
         subsDirty = false;
       }
 
-      var res = await fetch('/chat', {
+      var res = await fetch(API_BASE + '/chat', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body), signal: streamController.signal
       });
@@ -887,7 +892,7 @@
     var v = feedbackText.value.trim();
     if (!v) return;
     feedbackStatus.textContent = 'sending…';
-    fetch('/feedback', {
+    fetch(API_BASE + '/feedback', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ text: v })
     }).then(function () {
