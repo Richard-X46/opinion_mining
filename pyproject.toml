@@ -1,34 +1,57 @@
 [project]
 name = "opinion-mining"
 version = "0.1.0"
-description = "toy project DDGS + PRAW + HuggingFace"
+description = "Reddit opinion mining via agentic RAG pipeline"
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 dependencies = [
-    "fastapi>=0.121.3",
-    "uvicorn>=0.38.0",
-    "python-multipart>=0.0.20",
+    "flask>=3.0.0",
     "python-dotenv>=1.0.1",
     "praw>=7.8.1",
     "ddgs>=9.9.2",
-    "sentence-transformers>=5.1.2",
+    "sentence-transformers[onnx]>=5.1.2",
     "transformers>=4.57.3",
-    "torch>=2.9.1",
     "scikit-learn>=1.6.1",
-    "psycopg2-binary>=2.9.10",
-    "openai>=1.66.2",
-    "bitsandbytes>=0.49.0",
+    "langchain-groq>=1.1.2",
+    "langchain-core>=0.3.0",
+    "langgraph>=0.2.0",
+    "chromadb>=1.5.5",
+    "nltk>=3.9.4",
+    "groq>=0.9.0",
+    "pydantic>=2.0.0",
+    "plotly>=5.0.0",
+    "numpy>=1.26.0",
+    "umap-learn>=0.5.0",
+    "wordcloud>=1.9.0",
+    "matplotlib>=3.8.0",
+    "fastapi>=0.121.3",
+    "uvicorn>=0.38.0",
+    "logfire[fastapi]>=4.19.0",
+    "python-multipart>=0.0.27",
+    "aiohttp>=3.13.5",
+    "ipython>=9.13.0",
+    "pymoo>=0.6.1.6",
+    "langchain-typesafe>=0.0.1a3",
+    "edge-tts>=6.1.7",
+    "piper-tts>=1.8.0",
+    "soundfile>=0.14.0",
+    "httpx2>=2.3.0",
+    "sounddevice>=0.5.6",
+    "grandalf>=0.8",
 ]
-
-[tool.uv]
-index = [
-    { name = "pytorch-cpu", url = "https://download.pytorch.org/whl/cpu", explicit = true }
-]
-
-[tool.uv.sources]
-torch = { index = "pytorch-cpu" }
-
 
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["src*"]
+
+[tool.uv]
+extra-index-url = ["https://download.pytorch.org/whl/cpu"]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]

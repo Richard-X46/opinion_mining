@@ -1,9 +1,10 @@
-name: Deploy to AWS Lightsail with GHCR and Docker Compose
+name: Build and publish Opinion Mining image
 
 on:
   push:
     branches:
       - main
+      - feature/rag-core
 
 jobs:
   build-and-push:
