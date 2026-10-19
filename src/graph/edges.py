@@ -5,29 +5,34 @@ def route_input_safety(state: RAGState) -> str:
     return "blocked" if state.blocked else "rewrite"
 
 
-def route_corpus(state: RAGState) -> str:
-    # V1 drift-lite: (re-)ingest when the collection is empty or this query
-    # hasn't been ingested yet in the session. Adaptive drift detection is
-    # post-V1 (see docs/mission.md non-goals).
-    try:
-        from src.graph.store import collection
-        if collection.count() == 0:
-            return "ingest"
-    except Exception:
-        return "ingest"
-    return "ingest" if state.rewritten_query not in state.corpus_queries else "retrieve"
+FOLLOWUP_RETRY_FLOOR = 0.45
+_RECENCY_WORDS = frozenset(
+    "latest newest recent recently current currently today now update updates "
+    "new this week this month live breaking".split()
+)
 
 
 def route_intent(state: RAGState) -> str:
-    """Follow-ups skip ingest and answer from the session corpus.
-
-    Anything else falls through to the corpus check (ingest if this exact
-    query hasn't been ingested yet, else retrieve). The honesty guard in
-    app.py remains the backstop for empty retrievals.
-    """
+    """Follow-ups retrieve from the active topic; new topics always ingest."""
     if (state.intent or "") == "followup":
         return "retrieve"
-    return route_corpus(state)
+    return "ingest"
+
+
+def route_after_retrieve(state: RAGState) -> str:
+    """Weak follow-up retrieval gets one re-search of the SAME anchor subs.
+
+    This is the conversational repair path: a follow-up can be on-topic but
+    not covered by what was already indexed. Searching fresh subreddits here
+    would break the topic; searching the current anchor keeps continuity.
+    """
+    if (state.intent or "") == "followup" and state.ingest_attempts == 0 and state.session_subs:
+        weak = (not state.docs) or state.best_score < FOLLOWUP_RETRY_FLOOR
+        query = (state.query or "").lower()
+        wants_fresh = any(word in query for word in _RECENCY_WORDS)
+        if weak or wants_fresh:
+            return "ingest"
+    return "generate_prep"
 
 
 def route_output_safety(state: RAGState) -> str:

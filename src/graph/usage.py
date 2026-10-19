@@ -2,15 +2,15 @@
 
 Groq reports OpenAI-style usage on every non-streamed invoke (picked up via
 a LangChain callback) and on the final chunk of a stream (accumulated by the
-caller). Jev reports input/output tokens on every ClassifierResponse (picked
-up in src/graph/jev.py).
+caller). Jev reports input/output tokens on every ClassifierResponse
+(picked up from the chain output via the same callback).
 
-One tracker lives in a ContextVar per /chat request so concurrent requests
-never mix numbers. Always fail-safe: accounting must never break a run.
+One handler is created per /chat request and passed explicitly through the
+LangGraph config, so accounting survives thread-hops between streamed
+chunks. All parsing is best-effort: accounting must never break a run.
 """
-import contextvars
 import logging
-from typing import Any, Dict, Optional
+from typing import Any, Dict
 
 from langchain_core.callbacks import BaseCallbackHandler
 from langchain_core.outputs import LLMResult
@@ -48,27 +48,6 @@ class UsageTracker:
         }
 
 
-_tracker_var: contextvars.ContextVar[Optional[UsageTracker]] = contextvars.ContextVar(
-    "usage_tracker", default=None
-)
-
-
-def use_tracker(tracker: UsageTracker):
-    """Set the active tracker for this context; returns a token to reset it."""
-    return _tracker_var.set(tracker)
-
-
-def reset_tracker(token) -> None:
-    try:
-        _tracker_var.reset(token)
-    except Exception:
-        pass
-
-
-def active_tracker() -> Optional[UsageTracker]:
-    return _tracker_var.get()
-
-
 def _as_int(value: Any) -> int:
     try:
         return int(value or 0)
@@ -89,17 +68,30 @@ def _groq_tokens_from_llm_output(llm_output: Any) -> tuple[int, int]:
 
 
 class UsageCallbackHandler(BaseCallbackHandler):
-    """Counts Groq tokens on every nested (non-streamed) LLM invoke."""
+    """Counts Groq + Jev tokens for one request. Passed via LangGraph config
+    so it follows the run across threads; owns its tracker outright."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.tracker = UsageTracker()
 
     def on_llm_end(self, response: LLMResult, **kwargs: Any) -> None:
         try:
-            tracker = active_tracker()
-            if tracker is None:
-                return
             prompt, completion = _groq_tokens_from_llm_output(
                 getattr(response, "llm_output", None)
             )
             if prompt or completion:
-                tracker.record_groq(prompt, completion)
+                self.tracker.record_groq(prompt, completion)
         except Exception as e:
-            logging.debug(f"Usage handler skipped a run: {e}")
+            logging.debug(f"Usage handler skipped an LLM run: {e}")
+
+    def on_chain_end(self, outputs: Any, **kwargs: Any) -> None:
+        try:
+            usage = getattr(outputs, "usage", None)
+            if usage is not None:
+                self.tracker.record_jev(
+                    getattr(usage, "input_tokens", 0),
+                    getattr(usage, "output_tokens", 0),
+                )
+        except Exception as e:
+            logging.debug(f"Usage handler skipped a chain run: {e}")

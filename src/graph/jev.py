@@ -28,22 +28,6 @@ def _state_of(value) -> object:
     return value
 
 
-def _record_jev_usage(resp) -> None:
-    """Fold a ClassifierResponse's token counts into the active tracker."""
-    try:
-        from src.graph.usage import active_tracker
-        tracker = active_tracker()
-        if tracker is None:
-            return
-        usage = getattr(resp, "usage", None)
-        tracker.record_jev(
-            getattr(usage, "input_tokens", 0),
-            getattr(usage, "output_tokens", 0),
-        )
-    except Exception:
-        pass
-
-
 def noul(state, instruction: str, criteria=None) -> float | None:
     """Binary yes/no probability in [0, 1], or None on failure."""
     try:
@@ -52,7 +36,6 @@ def noul(state, instruction: str, criteria=None) -> float | None:
             "state": _state_of(state),
             "questions": {"q": Noul(instructions=instruction, criteria=criteria)},
         })
-        _record_jev_usage(resp)
         return resp.nouls["q"].noul
     except Exception as e:
         logging.warning(f"Jev noul failed: {e}")
@@ -67,7 +50,6 @@ def choice(state, instruction: str, criteria: dict) -> tuple[str, float] | None:
             "state": _state_of(state),
             "questions": {"q": Choice(instructions=instruction, criteria=criteria)},
         })
-        _record_jev_usage(resp)
         a = resp.choices["q"]
         return a.choice, float(a.confidence)
     except Exception as e:
@@ -85,7 +67,6 @@ def batch_noul(state, questions: dict[str, str]) -> dict[str, float]:
         from langchain_typesafe import Noul
         qs = {k: Noul(instructions=instr) for k, instr in questions.items()}
         resp = get_classifier().invoke({"state": _state_of(state), "questions": qs})
-        _record_jev_usage(resp)
         return {k: resp.nouls[k].noul for k in questions if k in resp.nouls}
     except Exception as e:
         logging.warning(f"Jev batch_noul failed: {e}")

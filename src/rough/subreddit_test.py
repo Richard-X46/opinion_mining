@@ -17,7 +17,7 @@ from src.ingestion.praw_fetcher import RedditFetcher
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
 
 QUERY = "latest chapter spoilers for onepiece"
-N_SUBS = 5
+N_SUBS = 50
 N_THREADS = 5
 
 # Words that describe the *question*, not the *topic*. Stripped before
@@ -80,7 +80,7 @@ def search_in_subreddit(query: str, subreddits: list[str] | str, n_threads: int 
 
 if __name__ == "__main__":
 
-    QUERY = "real madrid last game"
+    query = "whats the main selling point of the new iphone fold"
     names = search_subreddit(QUERY)
     names
     search_in_subreddit(QUERY, "soccer")

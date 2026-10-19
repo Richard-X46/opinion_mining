@@ -10,6 +10,7 @@ from src.graph.nodes import (
 from src.graph.edges import (
     route_input_safety,
     route_intent,
+    route_after_retrieve,
 )
 from src.ingestion.ingest import ingest
 import logging
@@ -20,13 +21,41 @@ def node_ingest(state: RAGState) -> RAGState:
     from src.graph.store import collection
     logging.info(f"Ingesting for query: {state.query}")
     before = collection.count()
-    posts = ingest(state.rewritten_query, session_id=state.session_id)
+    forced = [s for s in (state.subreddits or []) if s]
+    # Follow-ups search the active topic's anchor, never a freshly discovered
+    # community. New topics and user-pinned subs resolve/replace the anchor.
+    reuse_anchor = (
+        list(state.session_subs or [])
+        if not forced and (state.intent or "") == "followup"
+        else None
+    )
+    posts, subs_used = ingest(
+        state.rewritten_query,
+        session_id=state.session_id,
+        subreddits=forced or None,
+        anchor_subs=reuse_anchor,
+        raw_query=state.query,
+        topic_id=state.topic_id,
+        topic=state.topic_label,
+    )
     fresh = collection.count() - before
     logging.info(f"Fresh comments indexed this turn: {fresh}")
     corpus_queries = state.corpus_queries + [state.rewritten_query]
     titles = [p.get("title", "") for p in posts or []]
     corpus_threads = state.corpus_threads + [t for t in titles if t]
-    return {**state.model_dump(), "corpus_queries": corpus_queries, "corpus_threads": corpus_threads, "fresh_indexed": fresh}
+    if reuse_anchor:
+        session_subs = list(reuse_anchor)
+    else:
+        session_subs = [s for s in subs_used if s]
+    return {
+        **state.model_dump(),
+        "corpus_queries": corpus_queries,
+        "corpus_threads": corpus_threads,
+        "fresh_indexed": fresh,
+        "subreddits": subs_used,
+        "session_subs": session_subs,
+        "ingest_attempts": state.ingest_attempts + 1,
+    }
 
 
 builder = StateGraph(RAGState)
@@ -52,7 +81,11 @@ builder.add_conditional_edges(
     {"ingest": "ingest", "retrieve": "retrieve"},
 )
 builder.add_edge("ingest", "retrieve")
-builder.add_edge("retrieve", "generate_prep")
+builder.add_conditional_edges(
+    "retrieve",
+    route_after_retrieve,
+    {"ingest": "ingest", "generate_prep": "generate_prep"},
+)
 builder.add_edge("generate_prep", END)
 
 graph = builder.compile()
@@ -66,17 +99,33 @@ class Cancelled(Exception):
     """Raised when a stop request aborts a run between graph nodes."""
 
 
-def build_initial(query: str, state: RAGState | None = None, session_id: str = "") -> dict:
+def build_initial(query: str, state: RAGState | None = None, session_id: str = "",
+                  subreddits: list[str] | None = None, reseed: bool = False) -> dict:
     initial = state.model_dump() if state else {}
     # Carry over conversation memory (messages, corpus_queries) but reset
     # everything computed fresh each turn — otherwise a new query (or a
     # refreshed page with a new session) inherits stale docs/sources.
+    # subreddits is per-turn: explicit user picks pin the search, otherwise
+    # auto-resolve (never inherit last turn's subs into a new topic).
+    # reseed ("none of these") wipes the session anchor and counts the round —
+    # after two failed reseeds the app stops guessing and says sorry.
+    if reseed:
+        initial["session_subs"] = []
+        initial["topic_id"] = ""
+        initial["topic_label"] = ""
+        initial["anchor_attempts"] = (state.anchor_attempts if state else 0) + 1
+        initial["subreddits"] = []
     initial.update({
         "query": query,
         "session_id": session_id or initial.get("session_id", ""),
         "rewritten_query": "",
         "docs": [],
         "sources": [],
+        "source_details": [],
+        "subreddits": list(subreddits) if subreddits else [],
+        "force_new": bool(reseed or subreddits),
+        "ingest_attempts": 0,
+        "best_score": 0.0,
         "answer": "",
         "gen_messages": [],
         "fresh_indexed": 0,

@@ -46,3 +46,12 @@ include = ["src*"]
 
 [tool.uv]
 extra-index-url = ["https://download.pytorch.org/whl/cpu"]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]

@@ -50,11 +50,12 @@ JUDGE_SYSTEM = (
 )
 
 
-def judge_prompt(query: str, briefs: List[str]) -> str:
+def judge_prompt(query: str, briefs: List[str], topic: str = "") -> str:
     joined = "\n\n".join(briefs)
+    topic_line = f"Active topic/entity: {topic}\n" if topic else ""
     return f"""Today is {_today()}.
 
-User question (standalone, pronouns already resolved): {query}
+{topic_line}User question (standalone, pronouns already resolved): {query}
 
 Below are {len(briefs)} Reddit threads. For EACH thread, decide: does it contain opinions, experiences, facts, or summaries that could help answer the question? A thread about a different chapter, episode, product, or topic does NOT resolve it, even within the same franchise. If the question asks for the latest/current/today's anything, a thread that is weeks or months old does NOT resolve it — drop it.
 
@@ -90,7 +91,7 @@ def _fail_open(posts: List[Dict], reason: str) -> List[Dict]:
     return [{"resolves": True, "reason": reason} for _ in posts]
 
 
-def _judge_jev(query: str, posts: List[Dict]) -> List[Dict]:
+def _judge_jev(query: str, posts: List[Dict], topic: str = "") -> List[Dict]:
     """Jev path: one batched Noul per thread, dates + today in the state."""
     from src.graph.jev import batch_noul
     today = _today()
@@ -106,19 +107,21 @@ def _judge_jev(query: str, posts: List[Dict]) -> List[Dict]:
             "post": (p.get("body") or "")[:JUDGE_BODY_CHARS],
             "comments": comments,
         })
-    state = {"today": today, "query": query, "threads": threads}
+    state = {"today": today, "query": query, "topic": topic, "threads": threads}
     questions = {}
     for i, p in enumerate(posts):
         title = (p.get("title") or "")[:120]
         date = p.get("date") or "unknown"
+        topic_hint = f"The active topic/entity is \"{topic}\". " if topic else ""
         questions[f"keep_{i}"] = (
             f"Consider only the thread titled \"{title}\" (dated {date}). "
+            f"{topic_hint}"
             "Does it contain opinions, facts, or experiences that help answer the "
-            "user's question? Judge topic match first. On recency: ONLY penalize "
-            "an older thread if the question explicitly asks for the latest, "
-            "current, or today's information. A what/who/which question is "
-            "answered just as well by last year's thread — do not downvote it "
-            "for age."
+            "user's question? Judge topic match first; a thread about a different "
+            "entity does not resolve it. On recency: ONLY penalize an older thread "
+            "if the question explicitly asks for the latest, current, or today's "
+            "information. A what/who/which question is answered just as well by "
+            "last year's thread — do not downvote it for age."
         )
     probs = batch_noul(state, questions)
     verdicts = []
@@ -136,7 +139,7 @@ def _judge_jev(query: str, posts: List[Dict]) -> List[Dict]:
     return verdicts
 
 
-def judge_threads(query: str, posts: List[Dict]) -> List[Dict]:
+def judge_threads(query: str, posts: List[Dict], topic: str = "") -> List[Dict]:
     """Judge each thread against the query. Always returns one verdict per post."""
     if not posts:
         return []
@@ -145,7 +148,7 @@ def judge_threads(query: str, posts: List[Dict]) -> List[Dict]:
         return _fail_open(posts, "judge disabled")
     if DECISION_BACKEND == "jev":
         try:
-            return _judge_jev(query, posts)
+            return _judge_jev(query, posts, topic=topic)
         except Exception as e:
             return _fail_open(posts, f"jev error: {e}")
     try:
@@ -154,7 +157,7 @@ def judge_threads(query: str, posts: List[Dict]) -> List[Dict]:
         briefs = [thread_brief(i, p) for i, p in enumerate(posts)]
         raw = llm.invoke([
             ("system", JUDGE_SYSTEM),
-            ("user", judge_prompt(query, briefs)),
+            ("user", judge_prompt(query, briefs, topic=topic)),
         ]).content
         verdicts = parse_verdicts(raw or "", len(posts))
         if verdicts is None:

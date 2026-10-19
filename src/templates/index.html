@@ -129,14 +129,11 @@
   .source-pill{
     font-size:11px; color:var(--muted); border:1px solid var(--line);
     border-radius:999px; padding:2px 10px; text-decoration:none; white-space:nowrap;
+    max-width:230px; min-width:0; overflow:hidden; text-overflow:ellipsis;
   }
   a.source-pill::before{content:"↗ "; color:var(--muted)}
   a.source-pill:hover{color:var(--ink); border-color:var(--accent)}
   .source-pill.lead{border-color:var(--g2); color:var(--g2)}
-
-  /* per-answer token metrics */
-  .metrics{margin-top:10px; font-size:11px; color:var(--muted)}
-  .metrics b{color:var(--ink); font-weight:500}
 
   /* tri-color typing dots: pink → periwinkle → blue */
   #typing-indicator{display:none; align-items:center; gap:10px; padding:0 2px 8px}
@@ -193,9 +190,10 @@
     font-size:11px; letter-spacing:.08em; cursor:pointer; text-decoration:underline;
     text-underline-offset:3px}
   .foot button:hover{color:var(--accent)}
+  .foot .sep{color:var(--line); margin:0 6px}
 
-  /* about modal */
-  #about-modal{display:none; position:fixed; inset:0; z-index:100;
+  /* about + feedback modals */
+  #about-modal,#feedback-modal{display:none; position:fixed; inset:0; z-index:100;
     background:rgba(47,43,41,.5); align-items:center; justify-content:center; padding:20px}
   .about-card{
     background:var(--card); border:1px solid var(--line); border-radius:16px;
@@ -226,6 +224,100 @@
   #theme-toggle:focus-visible{outline:none; border-color:var(--accent)}
   #theme-toggle svg{width:15px; height:15px}
 
+  /* info button + usage popover — sits left of the theme toggle */
+  #info-btn{
+    position:fixed; top:14px; right:54px; z-index:70;
+    width:32px; height:32px; border-radius:50%;
+    background:var(--card); border:1px solid var(--line); color:var(--muted);
+    display:flex; align-items:center; justify-content:center; cursor:pointer; padding:0;
+  }
+  #info-btn:hover{color:var(--accent); border-color:var(--accent)}
+  #info-btn:focus-visible{outline:none; border-color:var(--accent)}
+  #info-btn svg{width:15px; height:15px}
+  #usage-panel{
+    position:fixed; top:54px; right:14px; z-index:70;
+    background:var(--card); border:1px solid var(--line); border-radius:12px;
+    padding:14px 16px; min-width:220px;
+    font-size:11.5px; line-height:1.9; color:var(--muted);
+    box-shadow:0 12px 32px rgba(0,0,0,.25);
+  }
+  #usage-panel .row{display:flex; justify-content:space-between; gap:18px}
+  #usage-panel .row b{color:var(--ink); font-weight:500}
+  #usage-panel .head{font-size:10.5px; letter-spacing:.12em; text-transform:uppercase; margin-bottom:4px}
+  /* subs mobile — small arrow button under the home icon; expands into a panel */
+  #subs-mobile{display:none}
+  @media (max-width:1150px){
+    #subs-mobile{
+      display:none;
+      position:fixed; top:52px; left:14px; z-index:69;
+      width:min(240px, calc(100vw - 28px));
+      background:var(--card); border:1px solid var(--line);
+      border-radius:12px; padding:6px 12px; margin:0; font-size:11.5px;
+      box-shadow:0 10px 24px rgba(0,0,0,.18);
+      overflow:hidden;
+    }
+    body.chat-active #subs-mobile.has-subs{display:block}
+    #subs-mobile:not([open]){
+      width:32px; height:32px; padding:0; border-radius:50%;
+    }
+    #subs-mobile summary{cursor:pointer; list-style:none; display:flex; gap:8px; align-items:center;
+      font-size:10.5px; letter-spacing:.12em; text-transform:uppercase; color:var(--muted); padding:4px 0}
+    #subs-mobile summary:hover{color:var(--accent)}
+    #subs-mobile summary::-webkit-details-marker{display:none}
+    #subs-mobile summary::marker{content:""}
+    #subs-mobile summary::after{content:"▴"; margin-left:auto}
+    #subs-mobile:not([open]) summary{width:100%; height:100%; padding:0; justify-content:center; gap:0}
+    #subs-mobile:not([open]) summary span{display:none}
+    #subs-mobile:not([open]) summary::after{display:none}
+    #subs-mobile:not([open]) summary::before{
+      content:""; width:7px; height:7px; margin-left:-2px;
+      border-right:1.5px solid currentColor; border-bottom:1.5px solid currentColor;
+      transform:rotate(-45deg);
+    }
+    #subs-mobile[open] summary::before{display:none}
+    #subs-mobile[open]{padding-bottom:10px}
+    #subs-mobile label{display:flex; gap:8px; align-items:center; padding:3px 0; cursor:pointer; overflow:hidden}
+    #subs-mobile label span{overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+    #subs-mobile-list{max-height:min(50vh, 360px); overflow:auto}
+    #subs-mobile .hint{margin-top:6px; font-size:10.5px; color:var(--muted)}
+  }
+  .sub-link{margin-left:auto; flex:none; color:var(--muted); text-decoration:none; font-size:11px; padding:0 2px}
+  .sub-link:hover{color:var(--accent)}
+  label.reseed span{color:var(--muted); font-style:italic}
+  @media (max-width:640px){
+    .source-pill{max-width:150px}
+  }
+
+  /* feedback form */
+  #feedback-text{
+    display:block; width:100%; font:inherit; font-size:13px; color:var(--ink);
+    background:var(--bg); border:1px solid var(--line); border-radius:10px;
+    padding:10px 12px; margin-top:10px; resize:vertical; min-height:84px; outline:none;
+  }
+  #feedback-text:focus{border-color:var(--muted)}
+  #feedback-send{
+    margin-top:10px; font:inherit; font-size:12px; letter-spacing:.08em; text-transform:uppercase;
+    background:transparent; color:var(--accent-bright); border:1px solid var(--accent-bright);
+    border-radius:999px; padding:7px 20px; cursor:pointer;
+  }
+  #feedback-send:hover{background:var(--accent); border-color:var(--accent); color:#fff}
+  #feedback-status{margin-left:10px; font-size:11.5px; color:var(--muted)}
+
+  /* subs rail — which communities were searched, user-overridable */
+  #subs-rail{
+    position:fixed; right:max(14px, calc(50% - 660px)); top:50%; transform:translateY(-50%);
+    width:190px; z-index:10; display:none;
+    background:var(--card); border:1px solid var(--line); border-radius:12px;
+    padding:12px 14px; font-size:11.5px;
+  }
+  body.chat-active #subs-rail.has-subs{display:block}
+  #subs-rail .head{font-size:10.5px; letter-spacing:.12em; text-transform:uppercase; color:var(--muted); margin-bottom:6px}
+  #subs-rail label{display:flex; gap:8px; align-items:center; padding:3px 0; cursor:pointer; overflow:hidden}
+  #subs-rail label span{overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+  #subs-rail input{accent-color:var(--accent-bright)}
+  #subs-rail .hint{margin-top:8px; font-size:10.5px; color:var(--muted)}
+  @media (max-width:1150px){ #subs-rail{display:none !important} }
+
   /* home — back to landing, visible only once a chat is open */
   #home-btn{
     position:fixed; top:14px; left:14px; z-index:70;
@@ -253,9 +345,26 @@
 </head>
 <body>
 <button id="theme-toggle" type="button" aria-label="Toggle light and dark mode"></button>
+<button id="info-btn" type="button" aria-label="Session usage info" aria-expanded="false">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"></circle><line x1="12" y1="11" x2="12" y2="16"></line><circle cx="12" cy="8" r="0.5" fill="currentColor"></circle></svg>
+</button>
+<div id="usage-panel" hidden>
+  <div class="head">session usage</div>
+  <div class="empty">ask something to start the meter</div>
+</div>
+<aside id="subs-rail" aria-label="Searched subreddits">
+  <div class="head">subs searched</div>
+  <div id="subs-list"></div>
+  <div class="hint">uncheck to exclude from the next search</div>
+</aside>
 <button id="home-btn" type="button" aria-label="Back to home">
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10.5 12 3l9 7.5"></path><path d="M5 9.5V21h14V9.5"></path></svg>
 </button>
+<details id="subs-mobile">
+  <summary><span>subs searched</span><span id="subs-mobile-count"></span></summary>
+  <div id="subs-mobile-list"></div>
+  <div class="hint">uncheck to exclude from the next search</div>
+</details>
 <div class="page">
 
   <main class="hero" id="hero">
@@ -297,6 +406,8 @@
 
   <div class="foot">
     <button type="button" onclick="document.getElementById('about-modal').style.display='flex'">about this prototype — data · stack · limits</button>
+    <span class="sep">·</span>
+    <button type="button" id="feedback-open">feedback or suggest a feature</button>
   </div>
 </div>
 
@@ -310,6 +421,16 @@
     <div class="limits-title">Limits</div>
     <p class="limits">Answers reflect only indexed Reddit threads — opinions, not facts — so coverage can be thin, biased, or stale, and safety filters or slow fetches may get in the way.</p>
     <p class="stack">Built with FastAPI · LangGraph · LangChain · Groq · TypeSafe Jev · ChromaDB · PRAW</p>
+  </div>
+</div>
+
+<div id="feedback-modal" role="dialog" aria-modal="true" aria-label="Feedback">
+  <div class="about-card">
+    <button class="close" type="button" onclick="document.getElementById('feedback-modal').style.display='none'" aria-label="Close">✕</button>
+    <div class="kicker">Feedback</div>
+    <p>What went wrong, or what would you like to see? Share a bug, a feature idea, or an improvement.</p>
+    <textarea id="feedback-text" rows="4" placeholder="What happened? What should have happened? Or what feature would you like?"></textarea>
+    <button id="feedback-send" type="button">send</button><span id="feedback-status"></span>
   </div>
 </div>
 
@@ -447,6 +568,17 @@
     try {
       streamController = new AbortController();
       var body = { query: query, session_id: sessionId };
+      var reseed = reseedRequested();
+      if (reseed) {
+        body.reseed_anchor = true;
+        userExcluded = {};
+        reseedOn = false;
+        subsDirty = false;
+      } else {
+        var pickedSubs = selectedSubs();
+        if (pickedSubs) body.subreddits = pickedSubs;
+        subsDirty = false;
+      }
 
       var res = await fetch('/chat', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -507,10 +639,12 @@
                 var list = document.createElement('div');
                 list.className = 'sources sources-collapsed';
                 top.forEach(function (url, i) {
+                  var d = (event.source_details && event.source_details[i]) || {};
                   var a = document.createElement('a');
                   a.className = 'source-pill' + (i === 0 ? ' lead' : '');
                   a.href = url; a.target = '_blank'; a.rel = 'noopener';
-                  a.textContent = 'Source ' + (i + 1); a.title = url;
+                  a.textContent = d.title || ('Source ' + (i + 1));
+                  a.title = (d.subreddit ? 'r/' + d.subreddit + ' · ' : '') + (d.title || url);
                   list.appendChild(a);
                 });
                 btn.onclick = function () {
@@ -520,12 +654,10 @@
                 botMsg.querySelector('.bubble').appendChild(wrap);
               }
               if (event.usage) {
-                var meta = document.createElement('div');
-                meta.className = 'metrics';
-                meta.innerHTML = 'groq <b>' + fmtTokens(event.usage.groq.in) + '</b> in · <b>' +
-                  fmtTokens(event.usage.groq.out) + '</b> out &nbsp;—&nbsp; jev <b>' +
-                  fmtTokens(event.usage.jev.in) + '</b> in · ' + event.usage.jev.calls + ' calls';
-                botMsg.querySelector('.bubble').appendChild(meta);
+                accumulateSessionUsage(event.usage);
+              }
+              if (event.subs) {
+                renderSubs(event.subs);
               }
               scrollToBottom();
             }
@@ -553,6 +685,101 @@
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); submitQuery(); }
   });
 
+  // Subs rail: which communities the last search used. Unchecking marks the
+  // selection dirty; the next submit sends only checked subs (all unchecked
+  // = back to auto-resolve).
+  var subsRail = document.getElementById('subs-rail');
+  var subsList = document.getElementById('subs-list');
+  var subsMobile = document.getElementById('subs-mobile');
+  var subsMobileList = document.getElementById('subs-mobile-list');
+  var subsMobileCount = document.getElementById('subs-mobile-count');
+  var currentSubs = [];
+  var userExcluded = {};
+  var reseedOn = false;
+  // Only send subreddits when the user actually changed the rail. Sending
+  // the auto-resolved list every turn makes the backend treat a follow-up
+  // as user-pinned and start a fresh topic.
+  var subsDirty = false;
+
+  function makeSubRow(name) {
+    var lab = document.createElement('label');
+    var cb = document.createElement('input');
+    cb.type = 'checkbox'; cb.className = 'sub-box';
+    cb.checked = !userExcluded[name.toLowerCase()]; cb.value = name;
+    cb.addEventListener('change', function () {
+      if (cb.checked) delete userExcluded[name.toLowerCase()];
+      else userExcluded[name.toLowerCase()] = true;
+      subsDirty = true;
+      renderSubs(currentSubs, true);
+    });
+    var sp = document.createElement('span');
+    sp.textContent = 'r/' + name;
+    sp.title = 'r/' + name;
+    var link = document.createElement('a');
+    link.className = 'sub-link';
+    link.href = 'https://www.reddit.com/r/' + name + '/';
+    link.target = '_blank'; link.rel = 'noopener';
+    link.textContent = '↗'; link.title = 'open r/' + name;
+    link.addEventListener('click', function (e) { e.stopPropagation(); });
+    lab.appendChild(cb); lab.appendChild(sp); lab.appendChild(link);
+    return lab;
+  }
+
+  function makeReseedRow() {
+    var lab = document.createElement('label');
+    lab.className = 'reseed';
+    var cb = document.createElement('input');
+    cb.type = 'checkbox'; cb.className = 'reseed-box';
+    cb.checked = reseedOn;
+    cb.addEventListener('change', function () {
+      reseedOn = cb.checked;
+      if (cb.checked) {
+        currentSubs.forEach(function (n) { userExcluded[n.toLowerCase()] = true; });
+      } else {
+        currentSubs.forEach(function (n) { delete userExcluded[n.toLowerCase()]; });
+      }
+      renderSubs(currentSubs, true);
+    });
+    var sp = document.createElement('span');
+    sp.textContent = 'none of these — search again';
+    lab.appendChild(cb); lab.appendChild(sp);
+    return lab;
+  }
+
+  function renderSubs(subs, force) {
+    subs = subs || [];
+    var key = subs.join('|');
+    var changed = key !== currentSubs.join('|');
+    if (!changed && !force) return;
+    currentSubs = subs;
+    [subsList, subsMobileList].forEach(function (container) {
+      container.innerHTML = '';
+      currentSubs.forEach(function (name) { container.appendChild(makeSubRow(name)); });
+      if (currentSubs.length) container.appendChild(makeReseedRow());
+    });
+    subsRail.classList.toggle('has-subs', currentSubs.length > 0);
+    subsMobile.classList.toggle('has-subs', currentSubs.length > 0);
+    subsMobileCount.textContent = currentSubs.length ? '(' + currentSubs.length + ')' : '';
+  }
+
+  // Hover-capable devices expand the mobile pill on hover; touch devices use
+  // the native details toggle (tap).
+  if (window.matchMedia && window.matchMedia('(hover: hover)').matches) {
+    subsMobile.addEventListener('mouseenter', function () { subsMobile.open = true; });
+    subsMobile.addEventListener('mouseleave', function () { subsMobile.open = false; });
+  }
+
+  function selectedSubs() {
+    if (!currentSubs.length || !subsDirty) return null;
+    var out = [];
+    subsList.querySelectorAll('.sub-box:checked').forEach(function (cb) { out.push(cb.value); });
+    return out.length ? out : null;
+  }
+
+  function reseedRequested() {
+    return reseedOn;
+  }
+
   function scrollToBottom() {
     messages.scrollTo({ top: messages.scrollHeight, behavior: 'smooth' });
   }
@@ -561,6 +788,62 @@
     n = n || 0;
     return n >= 1000 ? (n / 1000).toFixed(1) + 'k' : String(n);
   }
+
+  // Session usage meter: totals across turns, shown in the ⓘ popover.
+  var sessionUsage = null;
+  var usagePanel = document.getElementById('usage-panel');
+  var infoBtn = document.getElementById('info-btn');
+
+  function resetSessionUsage() {
+    sessionUsage = { groq: { in: 0, out: 0, calls: 0 }, jev: { in: 0, out: 0, calls: 0 } };
+    renderSessionUsage();
+  }
+
+  function accumulateSessionUsage(u) {
+    if (!sessionUsage) resetSessionUsage();
+    ['groq', 'jev'].forEach(function (k) {
+      if (!u[k]) return;
+      sessionUsage[k].in += u[k].in || 0;
+      sessionUsage[k].out += u[k].out || 0;
+      sessionUsage[k].calls += u[k].calls || 0;
+    });
+    renderSessionUsage();
+  }
+
+  function renderSessionUsage() {
+    if (!sessionUsage || (sessionUsage.groq.calls === 0 && sessionUsage.jev.calls === 0)) {
+      usagePanel.innerHTML = '<div class="head">session usage</div><div class="empty">ask something to start the meter</div>';
+      return;
+    }
+    var g = sessionUsage.groq, j = sessionUsage.jev;
+    usagePanel.innerHTML =
+      '<div class="head">session usage</div>' +
+      '<div class="row"><span>groq in</span><b>' + fmtTokens(g.in) + '</b></div>' +
+      '<div class="row"><span>groq out</span><b>' + fmtTokens(g.out) + '</b></div>' +
+      '<div class="row"><span>groq calls</span><b>' + g.calls + '</b></div>' +
+      '<div class="row"><span>jev in</span><b>' + fmtTokens(j.in) + '</b></div>' +
+      '<div class="row"><span>jev calls</span><b>' + j.calls + '</b></div>';
+  }
+
+  resetSessionUsage();
+
+  infoBtn.addEventListener('click', function (e) {
+    e.stopPropagation();
+    var open = usagePanel.hasAttribute('hidden');
+    if (open) {
+      usagePanel.removeAttribute('hidden');
+      infoBtn.setAttribute('aria-expanded', 'true');
+    } else {
+      usagePanel.setAttribute('hidden', '');
+      infoBtn.setAttribute('aria-expanded', 'false');
+    }
+  });
+  document.addEventListener('click', function (e) {
+    if (!usagePanel.hasAttribute('hidden') && !usagePanel.contains(e.target)) {
+      usagePanel.setAttribute('hidden', '');
+      infoBtn.setAttribute('aria-expanded', 'false');
+    }
+  });
 
   // Home: halt any live run, drop the transcript, back to landing.
   // Fresh session id so the next question starts a clean server session.
@@ -577,6 +860,12 @@
     input.placeholder = DEFAULT_PLACEHOLDER;
     input.style.height = 'auto';
     sessionId = null;
+    resetSessionUsage();
+    userExcluded = {};
+    reseedOn = false;
+    subsDirty = false;
+    renderSubs([]);
+    subsMobile.removeAttribute('open');
     window.scrollTo(0, 0);
   });
 
@@ -584,8 +873,40 @@
   aboutModal.addEventListener('click', function (e) {
     if (e.target === this) this.style.display = 'none';
   });
+
+  // Feedback form
+  var feedbackModal = document.getElementById('feedback-modal');
+  var feedbackText = document.getElementById('feedback-text');
+  var feedbackStatus = document.getElementById('feedback-status');
+  document.getElementById('feedback-open').addEventListener('click', function () {
+    feedbackStatus.textContent = '';
+    feedbackModal.style.display = 'flex';
+    feedbackText.focus();
+  });
+  document.getElementById('feedback-send').addEventListener('click', function () {
+    var v = feedbackText.value.trim();
+    if (!v) return;
+    feedbackStatus.textContent = 'sending…';
+    fetch('/feedback', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text: v })
+    }).then(function () {
+      feedbackStatus.textContent = 'sent — thank you.';
+      feedbackText.value = '';
+    }).catch(function () {
+      feedbackStatus.textContent = 'failed to send.';
+    });
+  });
+  feedbackModal.addEventListener('click', function (e) {
+    if (e.target === this) this.style.display = 'none';
+  });
   addEventListener('keydown', function (e) {
-    if (e.key === 'Escape') aboutModal.style.display = 'none';
+    if (e.key === 'Escape') {
+      aboutModal.style.display = 'none';
+      feedbackModal.style.display = 'none';
+      usagePanel.setAttribute('hidden', '');
+      infoBtn.setAttribute('aria-expanded', 'false');
+    }
   });
 </script>
 </body>

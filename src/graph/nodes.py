@@ -1,5 +1,5 @@
 from langchain_groq import ChatGroq
-from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
+from langchain_core.messages import HumanMessage, SystemMessage
 from src.config.settings import (
     INPUT_SAFETY_MODEL,
     REWRITE_MODEL,
@@ -47,10 +47,10 @@ def node_input_safety(state: RAGState) -> RAGState:
 
 
 def node_rewrite(state: RAGState) -> RAGState:
-    """Rewrite the user question as a short web-search query (not an answer).
+    """Rewrite the user question as a short Reddit search query (not an answer).
 
-    The output feeds DDGS (`site:reddit.com <query>`), so it must stay a
-    single short line — never markdown, bullets, or a full response.
+    The output feeds subreddit resolution and Reddit's thread search, so it
+    must stay a single short line — never markdown, bullets, or a full response.
     """
     llm = ChatGroq(model=REWRITE_MODEL)
     history = "\n".join([
@@ -66,8 +66,7 @@ Rules:
   Bad: "Reddit opinions on latest buzz about Navier-Stokes equations".
   Good: "Navier-Stokes equations breakthrough"
  - EXCEPTION: keep recency words when the user wants fresh info — latest,
-  newest, recent, current. They help match fresh threads on both DDGS
-  and Reddit search.
+   newest, recent, current. They help match fresh Reddit threads.
   "whats the latest onepiece chapter about" -> "latest One Piece chapter"
 - STANDALONE: resolve every pronoun and fragment from the history into the actual topic.
   "it", "this", "that", "the solution", "check X" must name the topic outright,
@@ -81,7 +80,7 @@ Question: {state.query}
 Search query:"""
     raw = llm.invoke(prompt).content.strip()
     # Keep only the first line, strip wrapping quotes, hard-cap length so a
-    # chatty model can never again blow up the DDGS query string.
+    # chatty model can never blow up the Reddit query string.
     rewritten = raw.split("\n")[0].strip().strip("\"'")[:150]
     if not rewritten:
         rewritten = state.query[:150]
@@ -90,33 +89,66 @@ Search query:"""
     return {**state.model_dump(), "rewritten_query": rewritten}
 
 
-def node_intent(state: RAGState) -> RAGState:
-    """Decide FOLLOWUP (answer from session corpus) vs NEW (ingest fresh).
+def _intent_state(state: RAGState) -> dict:
+    return {
+        "active_topic": state.topic_label or state.query,
+        "active_subreddits": list(state.session_subs),
+        "history": [
+            {"role": "user" if isinstance(m, HumanMessage) else "assistant", "content": m.content}
+            for m in state.messages[-4:]
+        ],
+        "ingested_threads": [t[:120] for t in state.corpus_threads[-15:]],
+        "question": state.query,
+    }
 
-    The old follow-up detector was an exact string match on rewritten queries
-    in app.py — "today Real Madrid match" != "Real Madrid last game", so a
-    same-topic follow-up got refused despite a relevant session corpus.
-    This node reads the history and the ingested thread titles and reasons
-    about it. Fail-open to NEW (today's behavior) on any error.
+
+INTENT_INSTRUCTION = (
+    "Is this question a continuation of the active topic, or does it switch to a "
+    "different subject/entity? A follow-up may ask for new information and still "
+    "belong to the same topic. A correction that replaces the subject (\"I meant X\"), "
+    "or a question about another game/product/person/team, is a topic switch."
+)
+
+
+def _apply_topic(state: RAGState, intent: str, reason: str) -> RAGState:
+    """Keep the topic scope on follow-ups; start a new one only on a real switch."""
+    if state.force_new:
+        intent = "new"
+        reason = "reseed/user-pinned subs"
+    if intent == "followup" and not state.session_subs:
+        # No active anchor to continue from; discover fresh rather than
+        # retrieving from an empty/unknown scope.
+        intent = "new"
+        reason = f"{reason}; no active anchor"
+    topic_id = state.topic_id
+    topic_label = state.topic_label
+    if intent != "followup" or not topic_id:
+        import uuid
+        topic_id = uuid.uuid4().hex
+        topic_label = state.query[:120]
+    logging.info(f"Intent: {intent} — {reason}")
+    return {**state.model_dump(), "intent": intent, "intent_reason": reason,
+            "topic_id": topic_id, "topic_label": topic_label, "force_new": False}
+
+
+def node_intent(state: RAGState) -> RAGState:
+    """Route the turn by topic continuity, not by whether the corpus can answer.
+
+    Follow-ups keep the active topic and its subreddit anchor. They are
+    allowed to need fresh information: the graph will re-search the same
+    anchor subs if retrieval is weak. A new topic (including "I meant X")
+    starts a new scope and resolves subreddits from scratch.
     """
-    if not state.messages and not state.corpus_threads:
-        return {**state.model_dump(), "intent": "new", "intent_reason": "first turn, empty session"}
+    if not state.messages and not state.corpus_threads and not state.session_subs:
+        return _apply_topic(state, "new", "first turn, empty session")
     if DECISION_BACKEND == "jev":
         from src.graph.jev import choice
-        st = {
-            "history": [
-                {"role": "user" if isinstance(m, HumanMessage) else "assistant", "content": m.content}
-                for m in state.messages[-4:]
-            ],
-            "ingested_threads": [t[:120] for t in state.corpus_threads[-15:]],
-            "question": state.query,
-        }
         result = choice(
-            st,
-            "Is this question a continuation of the prior conversation (a follow-up, clarification, or follow-on answerable from the already-ingested threads), or does it start a new or unrelated topic?",
+            _intent_state(state),
+            INTENT_INSTRUCTION,
             {
-                "followup": "Continues, clarifies, or narrows the prior topic; answerable from ingested threads.",
-                "new": "Starts a different or unrelated topic, or there are no ingested threads.",
+                "followup": "Same topic or a clarification/expansion of it, even if new facts are needed.",
+                "new": "Different subject/entity, or a correction that replaces the active subject.",
             },
         )
         if result is None:
@@ -125,14 +157,16 @@ def node_intent(state: RAGState) -> RAGState:
             label, conf = result
             intent_out = label
             reason = f"jev conf={conf:.2f}"
-        logging.info(f"Intent: {intent_out} — {reason}")
-        return {**state.model_dump(), "intent": intent_out, "intent_reason": reason}
+        return _apply_topic(state, intent_out, reason)
     history = "\n".join([
         f"{'User' if isinstance(m, HumanMessage) else 'Assistant'}: {m.content}"
         for m in state.messages[-4:]
     ])
     threads = "\n".join(f"- {t[:100]}" for t in state.corpus_threads[-15:]) or "(none yet)"
-    prompt = f"""You route a follow-up decision for a Reddit opinion-mining chatbot. The bot answers ONLY from ingested Reddit threads.
+    prompt = f"""You route topic continuity for a Reddit opinion-mining chatbot.
+
+Active topic: {state.topic_label or "(none yet)"}
+Active subreddits: {', '.join(state.session_subs) or "(none yet)"}
 
 Conversation history (most recent last):
 {history}
@@ -143,9 +177,10 @@ Threads already ingested this session (titles):
 Current user question: {state.query}
 
 Rules:
-- FOLLOWUP if the question continues, clarifies, or narrows the prior conversation AND the ingested threads could plausibly help answer it.
-- NEW if it starts a different topic, or if no ingested threads exist yet.
-- When in doubt, choose NEW (fresh ingest is the safe default).
+- FOLLOWUP if it continues, clarifies, or expands the active topic. A follow-up may ask for fresh opinions/info; that does NOT make it a new topic.
+- NEW if it switches to a different subject/entity, or corrects the subject ("I meant X").
+- Do NOT call it NEW just because the current threads cannot answer it.
+- If there is no active topic, choose NEW.
 
 Reply with a JSON object ONLY: {{"intent": "FOLLOWUP" or "NEW", "reason": "<=15 words"}}"""
     try:
@@ -156,15 +191,15 @@ Reply with a JSON object ONLY: {{"intent": "FOLLOWUP" or "NEW", "reason": "<=15 
         m = _re.search(r"\{.*\}", raw, _re.DOTALL)
         if not m:
             raise ValueError("no JSON object in reply")
-        intent = str(_json.loads(m.group(0)).get("intent", "")).upper()
+        parsed = _json.loads(m.group(0))
+        intent = str(parsed.get("intent", "")).upper()
         if intent not in ("FOLLOWUP", "NEW"):
             raise ValueError(f"unknown intent {intent!r}")
-        reason = str(_json.loads(m.group(0)).get("reason", ""))[:120]
+        reason = str(parsed.get("reason", ""))[:120]
         intent_out = intent.lower()
     except Exception as e:
         intent_out, reason = "new", f"intent LLM fail-open: {e}"
-    logging.info(f"Intent: {intent_out} — {reason}")
-    return {**state.model_dump(), "intent": intent_out, "intent_reason": reason}
+    return _apply_topic(state, intent_out, reason)
 
 
 def node_retrieve(state: RAGState) -> RAGState:
@@ -174,10 +209,18 @@ def node_retrieve(state: RAGState) -> RAGState:
     from src.ingestion.ingest import clean_text  # same normalization as indexed docs
     embedder = get_embedder()
     embedding = embedder.encode([clean_text(state.rewritten_query)]).tolist()
-    # Scope retrieval to this chat session: the collection is global/persistent,
-    # so without the filter a refreshed page (new session) would retrieve
-    # comments ingested for previous queries/sessions.
-    where = {"session_id": state.session_id} if state.session_id else None
+    # Scope retrieval to this chat session AND this topic: the collection is
+    # global/persistent, and one session can span several topics. Without the
+    # topic filter, an earlier topic's comments leak into a new answer.
+    if state.session_id and state.topic_id:
+        where = {"$and": [
+            {"session_id": state.session_id},
+            {"topic_id": state.topic_id},
+        ]}
+    elif state.session_id:
+        where = {"session_id": state.session_id}
+    else:
+        where = None
     results = collection.query(
         query_embeddings=embedding,
         n_results=TOP_K,
@@ -193,34 +236,45 @@ def node_retrieve(state: RAGState) -> RAGState:
         d = distances[i] if i < len(distances) else 1.0
         sim = max(0.0, min(1.0, 1.0 - d))  # cosine space => distance = 1 - cos_sim
         meta = metadatas[i] if i < len(metadatas) else {}
-        ranked.append((sim, doc, (meta or {}).get("url", "")))
+        ranked.append((sim, doc, meta or {}))
     ranked.sort(key=lambda t: t[0], reverse=True)
 
     best = ranked[0][0] if ranked else 0.0
     cutoff = max(SIM_FLOOR, best - SIM_MARGIN) if best >= 0.10 else 1.0
-    kept = [(doc, url) for sim, doc, url in ranked if sim >= cutoff]
+    kept = [(doc, meta) for sim, doc, meta in ranked if sim >= cutoff]
     logging.info(
         "Retrieved %d docs, kept %d (session=%s, best %.2f, cutoff %.2f): %s",
         len(docs), len(kept), state.session_id or "global", best, cutoff,
         [f"{s:.2f}" for s, _, _ in ranked[:TOP_K]],
     )
 
-    seen, sources = set(), []
-    for _, url in kept:
-        if url and url not in seen:
-            seen.add(url)
-            sources.append(url)
+    seen, sources, details = set(), [], []
+    for _, meta in kept:
+        # One pill per THREAD: comments from the same thread carry different
+        # comment permalinks, so deduping on URL shows one thread five times.
+        thread_key = meta.get("thread_url") or meta.get("title") or meta.get("url", "")
+        link = meta.get("thread_url") or meta.get("url", "")
+        if thread_key and link and thread_key not in seen:
+            seen.add(thread_key)
+            sources.append(link)
+            details.append({
+                "title": (meta.get("title", "") or "")[:120],
+                "subreddit": meta.get("subreddit", "") or "",
+                "url": link,
+            })
         if len(sources) >= 5:
             break
     return {**state.model_dump(),
             "docs": [doc for doc, _ in kept],
-            "sources": sources}
+            "sources": sources,
+            "source_details": details,
+            "best_score": round(best, 4)}
 
 
 GEN_SYSTEM = """Answer like ChatGPT: natural, conversational, in your own words. Ground every answer in the supplied background first, and fill gaps from your own knowledge where that helps.
 
 Hard rules:
-- Concise but complete: reply in at most 3 sentences that fully answer the question. Go longer only when the question genuinely needs explaining. Cut filler, never pad — but don't starve a complex question either.
+- Give a complete answer with real substance: several sentences up to a couple of short paragraphs, covering the main angles (the appeal, the trade-offs, the caveats) when the question warrants it. Go longer only when genuinely needed. Cut filler, never pad — but don't starve a complex question either.
 - Reddit-sourced specifics (what commenters claim, argue, or recommend) must come straight from the background — never invent them, and never present your own knowledge as something Redditors said. Do not describe what fans are doing, feeling, or looking for unless the background says so.
 - For generic, stable facts the background doesn't cover (release dates, casting, widely-known context), use your own knowledge to complete the answer. If you're unsure about a fact, say so in a clause rather than guessing it into existence. If the background was thin and the answer leans mostly on your own knowledge, say so in a brief clause.
 - Answer the exact question asked. If it asks for the best X, name them — do not describe the subject instead.

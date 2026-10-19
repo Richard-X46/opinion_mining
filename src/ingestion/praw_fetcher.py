@@ -9,16 +9,131 @@ from src.config.settings import (
     REDDIT_USERNAME,
     REDDIT_PASSWORD,
 )
-from src.ingestion.ddg_search import DDGSSearcher
-import json
+import math
 import re
 
 
 SUB_RESOLVE_LIMIT = 3
-SUGGEST_PER_QUERY = 2
-MAX_SUBS_TOTAL = 4
-SUB_SEARCH_LIMIT = 100
-SUB_COARSE_LIMIT = 20
+SUB_ENTITY_LIMIT = 4
+SUB_SEMANTIC_LIMIT = 10
+SUB_HARVEST_LIMIT = 15
+SUB_MIN_SCORE = 0.32
+
+# Generic query filler — not content. Used only to decide which phrases are
+# worth probing as entity names. Reddit remains the source of truth.
+_GENERIC = frozenset(
+    "what whats which where when who whom whose why how "
+    "is are was were be been being am do does did doing "
+    "the a an this that these those there here it its "
+    "i you your my me we our us they them their he she his her "
+    "of to in on for with about from by as at into over after before "
+    "and or but not no yes so if then than just also very really "
+    "any some can could should would will may might must "
+    "please thanks thank help useful use using tips tip advice recommend recommendations "
+    "latest newest recent currently current today now new news "
+    "best top good great worth buy buying "
+    "strategy strategies solution solutions approach ways "
+    "game games gaming".split()
+)
+
+
+def _words(text: str) -> list[str]:
+    return re.findall(r"[a-z0-9']+", (text or "").lower())
+
+
+def _normalize_name(text: str) -> str:
+    """Reddit names are alphanumeric; strip case and punctuation for comparison."""
+    return re.sub(r"[^a-z0-9]", "", (text or "").lower())
+
+
+def _content_words(text: str) -> list[str]:
+    return [w for w in _words(text) if len(w) > 1 and w not in _GENERIC]
+
+
+def entity_candidates(texts: list[str], limit: int = SUB_ENTITY_LIMIT) -> list[str]:
+    """Phrases from the question worth probing against real subreddit names.
+
+    Delimited chunks (the part after a dash/comma) are the strongest signal:
+    "there is this game - the farmer was replaced, any tips?" gives the exact
+    game name without an LLM. Sliding n-grams cover queries with no
+    punctuation. Nothing is assumed about the subject; Reddit verifies it.
+    """
+    priority: list[tuple[float, str]] = []
+    scored: list[tuple[float, str]] = []
+    seen: set[str] = set()
+
+    def add(phrase: str, bonus: float = 0.0, strong: bool = False) -> None:
+        phrase = re.sub(r"\s+", " ", (phrase or "")).strip(" .,!?:;-\"'")
+        if not phrase or len(phrase) > 80:
+            return
+        norm = _normalize_name(phrase)
+        if len(norm) < 3 or norm in seen:
+            return
+        words = _words(phrase)
+        content = [w for w in words if len(w) > 1 and w not in _GENERIC]
+        if not content:
+            return
+        seen.add(norm)
+        score = (
+            2.0 * len(content)
+            + 0.5 * min(len(words), 6)
+            + 0.1 * min(len(max(content, key=len)), 12)
+            + bonus
+        )
+        (priority if strong else scored).append((score, phrase))
+
+    for text in texts:
+        if not text:
+            continue
+        for quoted in re.findall(r'"([^"]{2,80})"', text):
+            add(quoted, bonus=3.0, strong=True)
+        for segment in re.split(r"[-,;:!?()\[\]{}|/\n]+", text):
+            # Dashes/commas usually isolate the actual subject from the
+            # question boilerplate, so keep those phrases ahead of n-grams.
+            add(segment, bonus=2.0, strong=True)
+        words = _words(text)
+        for n in range(min(5, len(words)), 0, -1):
+            for i in range(0, len(words) - n + 1):
+                add(" ".join(words[i:i + n]))
+
+    priority.sort(key=lambda item: (-item[0], -len(item[1])))
+    scored.sort(key=lambda item: (-item[0], -len(item[1])))
+    return [phrase for _, phrase in (priority + scored)[:limit]]
+
+
+def keyword_queries(raw_query: str, rewritten_query: str,
+                    primary_entity: str = "", limit: int = 2) -> list[str]:
+    """Compact, entity-free terms for searching inside a known subreddit.
+
+    Reddit search is lexical: a long rewrite like "fertilizer effect in The
+    Farmer Was Replaced" returns unrelated threads, while "fertilizer" finds
+    the right ones. Remove the already-resolved entity and the question
+    filler, keep the specific object terms.
+    """
+    excluded = set(_words(primary_entity)) if primary_entity else set()
+
+    def terms(text: str) -> list[str]:
+        return [w for w in _content_words(text) if w not in excluded]
+
+    out: list[str] = []
+
+    def add(words: list[str]) -> None:
+        words = list(dict.fromkeys(words))[:4]
+        if not words:
+            return
+        query = " ".join(words)
+        if query not in out:
+            out.append(query)
+
+    raw_terms = terms(raw_query)
+    rewritten_terms = terms(rewritten_query)
+    add(raw_terms[-4:])
+    add(rewritten_terms[-4:])
+    all_terms = list(dict.fromkeys(raw_terms + rewritten_terms))
+    if all_terms:
+        # One high-recall term: "fertilizer", "pumpkin", "spawned".
+        add([max(all_terms, key=len)])
+    return out[:limit]
 
 
 class RedditFetcher:
@@ -97,143 +212,240 @@ class RedditFetcher:
         """Fetch top comments as {body, url} dicts (url = comment permalink)."""
         return self.fetch_thread(url)["comments"]
 
-    def resolve_subreddits(self, query: str, limit: int = SUB_RESOLVE_LIMIT) -> List[str]:
-        """Pick subreddits via exhaustive PRAW discovery + Jev two-pass selection.
+    def resolve_subreddits_detailed(
+        self,
+        query: str,
+        raw_query: str = "",
+        limit: int = SUB_RESOLVE_LIMIT,
+    ) -> Dict:
+        """Resolve a question to subreddits using Reddit itself as ground truth.
 
-        1. `subreddits.search(query)` returns up to SUB_SEARCH_LIMIT real
-           candidates by name/title/description — kept in full, no truncation.
-        2. A proper-noun probe extracts named tokens from the query (e.g.
-           "Oshawa", "One Piece") and appends any that resolve to a real
-           subreddit, since whole-phrase search misses location/franchise subs.
-        3. Jev (TypeSafe classifier) scores the exhaustive list in one batched
-           Noul call, keeps the top SUB_COARSE_LIMIT, re-asks on that shortlist,
-           and keeps the top `limit`. On any Jev failure it falls back to
-           PRAW's relevance order.
+        Candidates come from three independent signals:
+        1. Exact/prefix name probes for entity phrases ("the farmer was
+           replaced" -> r/TheFarmerWasReplaced).
+        2. Reddit's subreddit search (title + description), which handles
+           aliases and communities whose name is not the subject ("man
+           united" -> r/reddevils).
+        3. A bounded site-wide thread harvest, weighted by result position
+           rather than raw hit count, so prolific generic subs cannot drown
+           out a niche one.
+
+        Scoring is deterministic; no LLM gets veto power over an exact name
+        match. Subscriber count is only a weak tiebreak.
         """
+        entities = entity_candidates([raw_query, query])
+        cands: dict[str, Dict] = {}
+
+        for entity in entities:
+            self._probe_exact_name(entity, cands)
+        # Semantic search is noisier, so spend it on the strongest phrases only.
+        for entity in entities[:2]:
+            self._search_subreddits(entity, cands)
+        self._search_subreddits(query, cands)
+        self._harvest_threads(query, cands)
+        if len(cands) < 2 and raw_query and raw_query != query:
+            self._harvest_threads(raw_query, cands)
+
+        # If a phrase literally names a subreddit, that phrase becomes the
+        # topic anchor. Long diluted rewrites ("steam farm simulation game
+        # farmer replaced tips") must not lend their generic tokens ("steam")
+        # the same weight as the exact name.
+        exact_entities: list[str] = []
+        for c in cands.values():
+            for entity in c.get("exact_entities", []):
+                if entity not in exact_entities:
+                    exact_entities.append(entity)
+        primary = (
+            min(exact_entities, key=lambda e: (len(_words(e)), len(_normalize_name(e))))
+            if exact_entities else ""
+        )
+        scoring_entities = [primary] if primary else entities
+
+        query_words = set(_content_words(query) or _words(query))
+        for c in cands.values():
+            c["name_score"] = self._name_score(c["name"], scoring_entities)
+            c["source_score"] = self._source_score(c)
+            c["desc_score"] = 0.0
+            c["score"] = (
+                0.50 * c["name_score"]
+                + 0.25 * c["source_score"]
+                + 0.10 * self._subscriber_score(c["subs"])
+            )
+
+        # Fetch descriptions only where they can change the ranking.
+        for c in sorted(cands.values(), key=lambda x: x["score"], reverse=True)[:8]:
+            self._enrich_candidate(c)
+            c["desc_score"] = self._desc_score(c, scoring_entities, query_words)
+            c["score"] += 0.15 * c["desc_score"]
+
+        ranked = sorted(cands.values(), key=lambda x: x["score"], reverse=True)
+        best = ranked[0]["score"] if ranked else 0.0
+        # With an exact anchor, hold secondary candidates to a relevance
+        # relative to it. Without one, use the absolute floor.
+        min_score = SUB_MIN_SCORE if not primary else max(SUB_MIN_SCORE, 0.45 * best)
+        picked: List[Dict] = []
+        picked_keys: set[str] = set()
+
+        def take(c: Dict) -> None:
+            key = _normalize_name(c["name"])
+            if key in picked_keys:
+                return
+            picked_keys.add(key)
+            picked.append(c)
+
+        # Exact name matches are anchors: they cannot be voted out by a
+        # classifier, subscriber count, or a generic sub's popularity.
+        for c in ranked:
+            if c.get("exact_entities") and len(picked) < limit:
+                take(c)
+        for c in ranked:
+            if len(picked) >= limit:
+                break
+            if c["score"] >= min_score:
+                take(c)
+        if not picked and ranked:
+            take(ranked[0])
+
+        for c in ranked[:10]:
+            state = "KEEP" if _normalize_name(c["name"]) in picked_keys else "drop"
+            logging.info(
+                f"Sub resolve: {state} r/{c['name']} score={c['score']:.2f} "
+                f"(name={c['name_score']:.2f} src={c['source_score']:.2f} "
+                f"desc={c['desc_score']:.2f} subs={c['subs']}) via {','.join(c['sources'])}"
+            )
+        return {
+            "subreddits": [c["name"] for c in picked],
+            "entities": entities,
+            "primary_entity": primary,
+            "candidates": ranked,
+        }
+
+    def resolve_subreddits(self, query: str, raw_query: str = "",
+                           limit: int = SUB_RESOLVE_LIMIT) -> List[str]:
+        """Backward-compatible name-only wrapper."""
+        return self.resolve_subreddits_detailed(query, raw_query=raw_query, limit=limit)["subreddits"]
+
+    def _add_candidate(self, cands: dict, sub, source: str, rank: int) -> None:
         try:
-            found = list(self.reddit.subreddits.search(query, limit=SUB_SEARCH_LIMIT))
-        except Exception as e:
-            logging.warning(f"Subreddit discovery failed for {query!r}: {e}")
-            return []
-        cands, seen = [], set()
-        for s in found:
-            try:
-                name = s.display_name
-            except Exception:
-                continue
-            key = name.lower()
-            if key in seen:
-                continue
-            seen.add(key)
-            try:
-                subs_count = s.subscribers
-            except Exception:
-                subs_count = None
-            if subs_count is None:
-                logging.info(f"Sub resolve: skip r/{name} (no subscriber count, likely inaccessible)")
-                continue
-            cands.append({
+            name = sub.display_name
+            subs = sub.subscribers
+        except Exception:
+            return
+        if not name or subs is None:
+            return
+        key = _normalize_name(name)
+        if not key:
+            return
+        c = cands.get(key)
+        if c is None:
+            c = {
                 "name": name,
-                "title": s.title or "",
-                "desc": (s.public_description or "")[:300],
-                "subs": subs_count,
-            })
-        for name in self._probe_named_subs(query, seen):
+                "subs": subs,
+                "sources": [],
+                "best_rank": rank,
+                "title": "",
+                "desc": "",
+                "exact_entities": [],
+                "_sub": sub,
+            }
+            cands[key] = c
+        c["best_rank"] = min(c["best_rank"], rank)
+        if source not in c["sources"]:
+            c["sources"].append(source)
+
+    def _probe_exact_name(self, phrase: str, cands: dict) -> None:
+        """Ask Reddit whether this phrase is literally a subreddit name."""
+        norm = _normalize_name(phrase)
+        if len(norm) < 3:
+            return
+        try:
+            found = self.reddit.subreddits.search_by_name(norm, exact=True)
+        except Exception:
+            return
+        for s in found:
+            self._add_candidate(cands, s, "exact_name", 0)
+            key = _normalize_name(getattr(s, "display_name", ""))
+            if key in cands and phrase not in cands[key]["exact_entities"]:
+                cands[key]["exact_entities"].append(phrase)
+
+    def _search_subreddits(self, phrase: str, cands: dict) -> None:
+        try:
+            found = list(self.reddit.subreddits.search(phrase, limit=SUB_SEMANTIC_LIMIT))
+        except Exception as e:
+            logging.warning(f"Sub resolve: subreddit search failed for {phrase!r}: {e}")
+            return
+        for rank, s in enumerate(found):
+            self._add_candidate(cands, s, "subreddit_search", rank)
+
+    def _harvest_threads(self, query: str, cands: dict) -> None:
+        """Rank subs by where matching threads actually live (position-weighted)."""
+        try:
+            stubs = list(self.reddit.subreddit("all").search(query, limit=SUB_HARVEST_LIMIT))
+        except Exception as e:
+            logging.warning(f"Sub resolve: thread harvest failed: {e}")
+            return
+        for rank, s in enumerate(stubs):
             try:
-                s = self.reddit.subreddit(name)
-                subs_count = s.subscribers
-                display = s.display_name or name
+                sub = s.subreddit
             except Exception:
                 continue
-            if subs_count is None or display.lower() in seen:
+            self._add_candidate(cands, sub, "thread_harvest", rank)
+
+    @staticmethod
+    def _name_score(name: str, entities: list[str]) -> float:
+        n = _normalize_name(name)
+        if not n:
+            return 0.0
+        best = 0.0
+        for entity in entities:
+            e = _normalize_name(entity)
+            if not e:
                 continue
-            seen.add(display.lower())
-            cands.append({
-                "name": display,
-                "title": s.title or display,
-                "desc": (s.public_description or "")[:300],
-                "subs": subs_count,
-            })
-            logging.info(f"Sub resolve: probed r/{display} (subs={subs_count})")
-        if not cands:
-            return []
-        picked = self._jev_pick(query, cands, limit)
-        kept = {n.lower() for n in picked}
-        for name in picked:
-            logging.info(f"Sub resolve: KEEP r/{name} (jev)")
-        for c in cands:
-            if c["name"].lower() not in kept:
-                logging.info(f"Sub resolve: DROP r/{c['name']}")
-        return picked
+            if n == e:
+                score = 1.0
+            elif e in n or n in e:
+                score = 0.70
+            else:
+                et = set(_content_words(entity))
+                nt = set(_content_words(name))
+                score = len(et & nt) / len(et) if et else 0.0
+            best = max(best, score)
+        return best
 
-    def _probe_named_subs(self, query: str, seen: set) -> List[str]:
-        """Capitalised runs (up to 3 words) that might name a subreddit."""
-        runs = re.findall(r"\b[A-Z][a-zA-Z]*(?:\s+[A-Z][a-zA-Z]*){0,2}\b", query)
-        out, dedup = [], set(seen)
-        for run in runs:
-            key = run.strip().lower()
-            if key and key not in dedup:
-                dedup.add(key)
-                out.append(run.strip())
-        return out
+    @staticmethod
+    def _source_score(c: Dict) -> float:
+        bases = {
+            "exact_name": 1.0,
+            "subreddit_search": 0.82,
+            "thread_harvest": 0.62,
+        }
+        best = max((bases.get(s, 0.4) for s in c["sources"]), default=0.0)
+        return max(0.0, best - min(c["best_rank"], 10) * 0.02)
 
-    def _jev_pick(self, query: str, cands: List[Dict], limit: int) -> List[str]:
-        """Two-pass Jev selection: exhaustive list -> top SUB_COARSE_LIMIT -> top `limit`.
+    @staticmethod
+    def _subscriber_score(subs: int) -> float:
+        return min(1.0, math.log10(max(int(subs or 0), 1)) / 7.0)
 
-        Pass 1 scores every candidate for broad relevance and keeps the top
-        SUB_COARSE_LIMIT. Pass 2 re-asks on the shortlist with a stricter
-        subject-specificity question and keeps only those clearing
-        JUDGE_THRESHOLD (up to `limit`) — so a query with one true home
-        returns one sub instead of padding to three with wrong-city lookalikes.
-        Fails open to PRAW relevance order on any Jev error or empty scores.
-        """
-        fallback = [c["name"] for c in cands[:limit]]
+    def _enrich_candidate(self, c: Dict) -> None:
+        sub = c.get("_sub")
+        if sub is None:
+            return
         try:
-            from src.graph.jev import batch_noul
-            from src.config.settings import JUDGE_THRESHOLD
+            c["title"] = sub.title or ""
+        except Exception:
+            pass
+        try:
+            c["desc"] = (sub.public_description or "")[:500]
+        except Exception:
+            pass
 
-            def _score(subset: List[Dict], template: str) -> dict:
-                state = {"query": query, "candidates": subset}
-                questions = {
-                    c["name"]: template.format(
-                        name=c["name"], title=c["title"][:120], desc=c["desc"][:200]
-                    )
-                    for c in subset
-                }
-                return batch_noul(state, questions)
-
-            probs1 = _score(
-                cands,
-                "Consider the subreddit r/{name} (title: {title}). Description: {desc}. "
-                "Does it host discussion that could help answer the user's question?",
-            )
-            if not probs1:
-                raise ValueError("pass 1 returned no scores")
-            coarse = sorted(
-                cands, key=lambda c: probs1.get(c["name"], -1.0), reverse=True
-            )[:SUB_COARSE_LIMIT]
-
-            probs2 = _score(
-                coarse,
-                "Of the candidate subreddits, is r/{name} (title: {title}) about the "
-                "specific subject the question names — the exact place, franchise, team, "
-                "or product — and not merely the general topic? A sub about the same "
-                "topic but a different specific subject is NOT a match.",
-            )
-            shortlist = sorted(
-                coarse, key=lambda c: probs2.get(c["name"], -1.0), reverse=True
-            )
-            picked = [
-                c["name"]
-                for c in shortlist
-                if probs2.get(c["name"], 0.0) >= JUDGE_THRESHOLD
-            ][:limit]
-            if not picked:
-                picked = [c["name"] for c in shortlist[:limit]]
-            return picked
-        except Exception as e:
-            logging.warning(f"Sub pick Jev fail-open ({e}): using PRAW relevance order")
-            return fallback
+    @staticmethod
+    def _desc_score(c: Dict, entities: list[str], query_words: set[str]) -> float:
+        text = f"{c.get('title', '')} {c.get('desc', '')}"
+        target = set(_content_words(" ".join(entities))) | set(query_words)
+        if not target:
+            return 0.0
+        return len(set(_content_words(text)) & target) / len(target)
 
     def search_new(self, subreddits: List[str], query: str, limit_per_sub: int = 3,
                    sort: str = "relevance", time_filter: str = "all") -> List[Dict]:
@@ -281,13 +493,6 @@ class RedditFetcher:
 
 
 if __name__ == "__main__":
-    query = "do androids dream of electric sheep"
-    searcher = DDGSSearcher()
     fetcher = RedditFetcher()
-    dir(fetcher)
-    posts = searcher.search(query, max_results=5)
-    enriched_posts = fetcher.enrich(posts)
-    # json loads indent=2 for readability
-    print(json.dumps(enriched_posts, indent=2))
-
-    
+    query = "farmer replaced game tips"
+    print(fetcher.resolve_subreddits_detailed(query))

@@ -1,4 +1,5 @@
 # notifications utility for sending messages to Discord via webhook
+import logging
 import requests
 import threading
 from src.config.settings import DISCORD_WEBHOOK_URL
@@ -13,16 +14,19 @@ def _post_webhook(message: str, retries: int = 3, delay: float = 2.0):
                 timeout=5
             )
             resp.raise_for_status()
-            print(f"[discord] sent: {resp.status_code}")
-            print("Limit:", resp.headers.get("X-RateLimit-Limit"))
-            print("Remaining:", resp.headers.get("X-RateLimit-Remaining"))
-            print("Reset After:", resp.headers.get("X-RateLimit-Reset-After"))
-            return  
+            logging.info("[discord] sent: %s", resp.status_code)
+            logging.debug(
+                "[discord] rate limit: %s/%s, reset %ss",
+                resp.headers.get("X-RateLimit-Remaining"),
+                resp.headers.get("X-RateLimit-Limit"),
+                resp.headers.get("X-RateLimit-Reset-After"),
+            )
+            return
         except Exception as e:
             if attempt < retries - 1:
                 time.sleep(delay)
             else:
-                print(f"[discord] failed after {retries} attempts: {e}")
+                logging.warning("[discord] failed after %s attempts: %s", retries, e)
 
 def notify_discord(message: str):
     if not DISCORD_WEBHOOK_URL or "None" in DISCORD_WEBHOOK_URL:

@@ -21,13 +21,6 @@ OUTPUT_SAFETY_ENABLED = os.getenv("OUTPUT_SAFETY_ENABLED", "false").lower() == "
 # Thread-relevance judge: cheap model, one batched call per ingest.
 JUDGE_MODEL = os.getenv("JUDGE_MODEL", REWRITE_MODEL)
 JUDGE_ENABLED = os.getenv("JUDGE_ENABLED", "true").lower() == "true"
-DEFAULT_MODEL = os.getenv("DEFAULT_MODEL", REWRITE_MODEL)
-
-# Subreddit selection gets its own reasoning model: "which community discusses
-# X" needs real judgment, and the cheap 20b rewrite model demonstrably failed
-# it (dropped r/OnePiece, suggested generic r/anime). Qwen 3.8 27B runs in
-# thinking mode on Groq's free tier.
-SUB_MODEL = os.getenv("SUB_MODEL", "qwen/qwen3.8-27b")
 
 # TypeSafe Jev — a classifier, not a chat model. Used for every DECISION in
 # the pipeline (safety, intent, thread judge) via /v1/systemone. Groq stays
@@ -38,7 +31,9 @@ JEV_MODEL = os.getenv("JEV_MODEL", "jev-latest")
 # Fall back to "groq" automatically if no key is set.
 DECISION_BACKEND = os.getenv("DECISION_BACKEND", "jev" if JEV_API_KEY else "groq").lower()
 # Jev Noul probability above which a thread is kept by the judge.
-JUDGE_THRESHOLD = float(os.getenv("JUDGE_THRESHOLD", "0.5"))
+# Kept low-ish on purpose: a wrong drop is unrecoverable, a wrong keep is
+# just embedding + retrieval noise for the ranker to sort out.
+JUDGE_THRESHOLD = float(os.getenv("JUDGE_THRESHOLD", "0.35"))
 
 # Retrieval configuration (free tier is 8K TPM — keep this small)
 TOP_K = int(os.getenv("TOP_K", "10"))
