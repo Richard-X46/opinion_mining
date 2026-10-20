@@ -1,16 +1,20 @@
 ## Reddit Opinion Mining
-A web app for basic sentiment analysis and opinion mining on Reddit posts using NLP and machine learning.
 
-Features
-Fetches Reddit posts using DDGS & PRAW
-Sentiment analysis with Hugging Face models
-Summarizes Reddit discussions
-Scores comment relevance
+A conversational RAG chatbot that mines Reddit for real opinions. Ask a question and it searches Reddit in real time, indexes comments in ChromaDB, and answers with citations.
+
+- PRAW-native subreddit discovery and thread fetching (deterministic, no web search)
+- Thread relevance filtering with TypeSafe Jev classifiers
+- Embedding-based retrieval and ranking over a per-session corpus
+- Streaming answers from Groq LLMs over SSE, with cancellable runs
+
+**Stack:** FastAPI · LangGraph · LangChain · Groq · TypeSafe Jev · ChromaDB · PRAW
+**Deploy:** Docker + Caddy on Oracle Cloud, GitHub Actions → GHCR
 
 ### Status
-Experimental project for learning and testing LLMs.
+Experimental prototype — answers reflect indexed Reddit opinions, not facts.
 
-🔗 Demo: [Ask Reddit](https://richard-x46.me/opinion-mining)
+🔗 Demo: [Ask Reddit](https://richard-pears.dev/opinion-mining/)
+
 ## License
 
 [MIT License](LICENSE)
